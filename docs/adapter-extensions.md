@@ -25,21 +25,17 @@ package-root/
   tuners/*.ts              # Tuner Adapter Extensions
 ```
 
-`package.json` uses the standard Pi manifest. The Host package declares all capability entry points:
+The Host package declares only its root Pi entrypoint. The root scans its capability directories at startup and on `/reload`, so Pi displays the Host package as one extension while file-level additions and removals remain discoverable:
 
 ```json
 {
   "pi": {
-    "extensions": [
-      "./index.ts",
-      "./providers/*.ts",
-      "./status/*.ts",
-      "./preflight/*.ts",
-      "./tuners/*.ts"
-    ]
+    "extensions": ["./index.ts"]
   }
 }
 ```
+
+As a result, `pi config` enables or disables the Host package as a whole rather than selecting individual capability files. Put Adapters that require independent enablement in a standalone Adapter package.
 
 Standalone Adapter packages declare only their own capability entry points. Pi isolates module roots across packages, preventing an installed package from directly resolving another package's `node_modules`. An npm Adapter package importing helpers from `@hyav/pi-provider` must list it under both `dependencies` and `bundledDependencies`:
 
@@ -61,7 +57,7 @@ Standalone Adapter packages declare only their own capability entry points. Pi i
 }
 ```
 
-Only core host packages provided by Pi should use `peerDependencies` with `"*"`. Files matched by glob patterns must default-export a Pi extension factory. Standalone Adapter packages must not re-declare or re-execute the Host's `index.ts`.
+Only core host packages provided by Pi should use `peerDependencies` with `"*"`. Files in the Host capability directories and files matched by standalone package glob patterns must default-export a Pi extension factory. Standalone Adapter packages must not re-declare or re-execute the Host's `index.ts`.
 
 ## File Contract
 
@@ -88,13 +84,13 @@ Other directories use `defineStatusExtension`, `definePreflightExtension`, and `
 - Preflight: `id`, `providerId`
 - Tuner: `id`
 
-Helpers validate static identity descriptors before instantiation and verify that the resulting Adapter identity matches. Adapter IDs must be non-empty, non-whitespace stable identifiers. Named exports may be provided for programmatic invocation, but the default export serves as the Pi loader contract.
+Helpers validate static identity descriptors before instantiation and verify that the resulting Adapter identity matches. Adapter IDs must be non-empty, non-whitespace stable identifiers. Named exports may be provided for programmatic invocation, but the default export is the shared contract for the Host's internal loader and Pi's standalone-package loader.
 
 ## Lifecycle
 
 ### Extension Factory Phase
 
-Pi re-executes all extension factories upon startup and `/reload`. The Adapter helper:
+Pi re-executes the Host root extension factory upon startup and `/reload`. The root creates the Host, scans the capability directories in deterministic path order, and loads every current `.ts` or `.js` file with module caching disabled. Pi continues to load standalone Adapter packages from their own manifests. The Adapter helper:
 
 1. Validates the static descriptor;
 2. Instantiates the Adapter;
@@ -114,7 +110,7 @@ Host ordering follows deterministic rules:
 
 ### `session_shutdown` and `/reload`
 
-The previous Host aborts inflight requests, clears caches and diagnostics, and unregisters event listeners. Each Pi runtime supports exactly one active Host. `/reload` re-discovers manifest files and constructs a fresh Host:
+The previous Host aborts inflight requests, clears caches and diagnostics, and unregisters event listeners. Each Pi runtime supports exactly one active Host. `/reload` re-executes the root entrypoint, scans the current capability files, and constructs a fresh Host:
 
 - Newly added files become active after reload;
 - Removed files are cleaned up after reload;
@@ -125,5 +121,5 @@ The previous Host aborts inflight requests, clears caches and diagnostics, and u
 - Empty IDs, whitespace IDs, mismatched identities, invalid timing options, and malformed adapter shapes invalidate the affected module.
 - Duplicate Adapter IDs within the same capability or duplicate Status/Preflight bindings for the same Provider exclude all conflicting entries to prevent load-order ambiguity.
 - Provider conflicts clean up dynamic overrides, restoring native built-ins when present.
-- A missing default export, thrown factory exception, or corrupted envelope isolates only the failing file without impacting healthy adapters.
+- A missing default export, thrown factory exception, or corrupted envelope isolates only the failing file without impacting healthy adapters. Load failures use capability-relative paths instead of exposing absolute installation paths.
 - Status and Preflight adapters can bind to either Provider Kit Providers or native Pi Providers. Unresolvable bindings isolate the individual adapter and report diagnostic warnings.

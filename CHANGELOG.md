@@ -2,6 +2,11 @@
 
 This file is the authoritative user-facing release history for `@hyav/pi-provider`.
 
+## Unreleased
+
+- Expose one Pi package entrypoint while preserving file-level Adapter discovery when `/reload` runs.
+- Isolate invalid Adapter modules behind capability-relative diagnostics and declare `jiti` as the runtime loader.
+
 ## 0.1.1 - 2026-08-16
 
 - Hardened zero-coupling contract tests and isolated temporary directories for manifest drop-in validation.

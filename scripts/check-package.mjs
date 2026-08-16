@@ -32,21 +32,6 @@ const requiredFiles = [
 	"LICENSE",
 ];
 
-const entryPoints = [
-	"index.ts",
-	"providers/charm-hyper.ts",
-	"preflight/charm-hyper.ts",
-	"preflight/deepseek.ts",
-	"preflight/google.ts",
-	"preflight/openai-codex.ts",
-	"preflight/opencode.ts",
-	"preflight/opencode-go.ts",
-	"status/charm-hyper.ts",
-	"status/deepseek.ts",
-	"status/openai-codex.ts",
-	"status/opencode-go.ts",
-];
-
 function readJson(path) {
 	return JSON.parse(readFileSync(path, "utf8"));
 }
@@ -132,17 +117,20 @@ function run() {
 	if (typeof rootExport !== "string" || !existsSync(join(packageRoot, rootExport))) {
 		throw new Error("npm artifact has no existing root export target");
 	}
-	if (!Array.isArray(packageJson.pi?.extensions) || packageJson.pi.extensions.length !== 5) {
+	if (JSON.stringify(packageJson.pi?.extensions) !== JSON.stringify(["./index.ts"])) {
 		throw new Error("npm artifact has an unexpected Pi extension manifest");
 	}
 
-	const paths = entryPoints.map((entry) => join(packageRoot, entry));
+	const paths = [join(packageRoot, "index.ts")];
 	return discoverAndLoadExtensions(paths, packageRoot, packageRoot).then((result) => {
 		if (result.errors.length > 0) {
 			throw new Error(`published Pi entry points failed to load: ${JSON.stringify(result.errors)}`);
 		}
 		if (result.extensions.length !== paths.length) {
 			throw new Error(`expected ${paths.length} published Pi entry points, loaded ${result.extensions.length}`);
+		}
+		if (!result.runtime.pendingProviderRegistrations.some(({ name }) => name === "charm-hyper")) {
+			throw new Error("published root entrypoint did not load the built-in Charm Hyper Provider Adapter");
 		}
 		console.log(
 			`artifact ok: ${metadata.filename} (${artifactFiles.length} files, ${result.extensions.length} Pi entry points)`,

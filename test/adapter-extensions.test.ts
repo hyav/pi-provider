@@ -13,7 +13,7 @@ import { createProviderKitHost } from "../core/host.ts";
 import { clearPricingCache, OPENROUTER_MODELS_URL } from "../core/official-pricing.ts";
 import type { PreflightAdapter } from "../core/preflight-manager.ts";
 import type { ProviderAdapter, StatusAdapter, TunerAdapter } from "../core/types.ts";
-import {
+import providerKitExtension, {
 	definePreflightExtension,
 	defineProviderExtension,
 	defineStatusExtension,
@@ -186,6 +186,146 @@ function extensionFactories(options: { statusCalls?: { count: number } } = {}) {
 function createContext(pi: TestPi, providerId: string, modelId = "test-model") {
 	return pi.context(providerId, modelId);
 }
+
+async function writeFixturePackageEntrypoint(root: string): Promise<string> {
+	const entrypoint = join(root, "index.ts");
+	await writeFile(
+		entrypoint,
+		`
+import { createProviderKitExtension } from ${JSON.stringify(join(import.meta.dirname, "../index.ts"))};
+export default createProviderKitExtension({
+  adapterRoot: ${JSON.stringify(root)},
+  dependencies: { enableOfficialPricingFallback: false },
+});
+`,
+	);
+	return entrypoint;
+}
+
+test("the package entrypoint loads every built-in adapter", async () => {
+	const pi = new TestPi();
+	const registrations: Array<{ kind: string; id: string }> = [];
+	pi.events.on(PROVIDER_KIT_ADAPTER_EVENT, (value) => {
+		if (value && typeof value === "object" && "kind" in value && "id" in value) {
+			registrations.push({
+				kind: String(value.kind),
+				id: String(value.id),
+			});
+		}
+	});
+
+	await providerKitExtension(pi as unknown as ExtensionAPI);
+
+	assert.deepEqual(
+		registrations.sort((left, right) => `${left.kind}:${left.id}`.localeCompare(`${right.kind}:${right.id}`)),
+		[
+			{ kind: "preflight", id: "charm-hyper-preflight" },
+			{ kind: "preflight", id: "deepseek-preflight" },
+			{ kind: "preflight", id: "google-preflight" },
+			{ kind: "preflight", id: "openai-codex-preflight" },
+			{ kind: "preflight", id: "opencode-go-preflight" },
+			{ kind: "preflight", id: "opencode-preflight" },
+			{ kind: "provider", id: "charm-hyper" },
+			{ kind: "status", id: "charm-hyper-status" },
+			{ kind: "status", id: "deepseek-status" },
+			{ kind: "status", id: "openai-codex-status" },
+			{ kind: "status", id: "opencode-go-status" },
+		],
+	);
+});
+
+test("reloading the package entrypoint discovers added and removed adapter files", async () => {
+	const root = await mkdtemp(join(tmpdir(), "pi-provider-reload-add-"));
+	try {
+		const providersDir = join(root, "providers");
+		await import("node:fs/promises").then((fs) => fs.mkdir(providersDir, { recursive: true }));
+		const entrypoint = await writeFixturePackageEntrypoint(root);
+
+		const loadProviderIds = async (): Promise<string[]> => {
+			const result = await discoverAndLoadExtensions([entrypoint], root, root);
+			assert.deepEqual(result.errors, []);
+			assert.equal(result.extensions.length, 1);
+			return result.runtime.pendingProviderRegistrations.map(({ name }) => name);
+		};
+
+		assert.deepEqual(await loadProviderIds(), []);
+		const providerPath = join(providersDir, "reload-provider.ts");
+		await writeFile(
+			providerPath,
+			`
+import { defineProviderExtension } from "${join(import.meta.dirname, "../index.ts")}";
+export default defineProviderExtension({
+  id: "reload-provider",
+  create: () => ({
+    id: "reload-provider",
+    provider: {
+      name: "Reload Provider",
+      baseUrl: "https://provider.invalid/v1",
+      apiKey: "$RELOAD_PROVIDER_KEY",
+      api: "openai-completions",
+      models: [{ id: "reload-model" }],
+    },
+  }),
+});
+`,
+		);
+
+		assert.deepEqual(await loadProviderIds(), ["reload-provider"]);
+		await rm(providerPath);
+		assert.deepEqual(await loadProviderIds(), []);
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+test("the package entrypoint isolates an invalid adapter and reports its capability path", async () => {
+	const root = await mkdtemp(join(tmpdir(), "pi-provider-reload-invalid-"));
+	const warnings: string[] = [];
+	const originalWarn = console.warn;
+	try {
+		const providersDir = join(root, "providers");
+		await import("node:fs/promises").then((fs) => fs.mkdir(providersDir, { recursive: true }));
+		const entrypoint = await writeFixturePackageEntrypoint(root);
+		await writeFile(join(providersDir, "invalid.ts"), "export default 42;\n");
+		await writeFile(
+			join(providersDir, "throwing.ts"),
+			'export default () => { throw new Error("factory failed"); };\n',
+		);
+		await writeFile(
+			join(providersDir, "valid.ts"),
+			`
+import { defineProviderExtension } from "${join(import.meta.dirname, "../index.ts")}";
+export default defineProviderExtension({
+  id: "valid-after-invalid",
+  create: () => ({
+    id: "valid-after-invalid",
+    provider: {
+      name: "Valid Provider",
+      baseUrl: "https://provider.invalid/v1",
+      apiKey: "$VALID_PROVIDER_KEY",
+      api: "openai-completions",
+      models: [{ id: "valid-model" }],
+    },
+  }),
+});
+`,
+		);
+		console.warn = (message?: unknown) => warnings.push(String(message));
+
+		const result = await discoverAndLoadExtensions([entrypoint], root, root);
+
+		assert.deepEqual(result.errors, []);
+		assert.equal(result.extensions.length, 1);
+		assert.ok(result.runtime.pendingProviderRegistrations.some(({ name }) => name === "valid-after-invalid"));
+		assert.deepEqual(warnings, [
+			'[provider-kit] failed to load adapter extension "providers/invalid.ts": default export must be a Pi extension factory',
+			'[provider-kit] failed to load adapter extension "providers/throwing.ts": factory failed',
+		]);
+	} finally {
+		console.warn = originalWarn;
+		await rm(root, { recursive: true, force: true });
+	}
+});
 
 async function loadDynamicSet(hostFirst: boolean): Promise<{ pi: TestPi; context: TestContext }> {
 	const pi = new TestPi();
@@ -927,79 +1067,5 @@ test("index.ts remains strictly decoupled with zero static imports to capability
 			false,
 			`index.ts must not statically import from ./${dir} to ensure drop-in capability files remain autonomous`,
 		);
-	}
-});
-
-test("drop-in capability files can be added or removed without modifying index.ts via manifest discovery", async () => {
-	const root = await mkdtemp(join(tmpdir(), "pi-provider-manifest-dropin-"));
-	try {
-		const pkgJson = await import("node:fs/promises").then((fs) =>
-			fs.readFile(join(import.meta.dirname, "../package.json"), "utf-8"),
-		);
-		const manifest = JSON.parse(pkgJson);
-		const extensionGlobs = manifest.pi?.extensions as string[];
-		assert.ok(extensionGlobs.includes("./tuners/*.ts"), "manifest must declare ./tuners/*.ts glob");
-
-		const indexPath = join(root, "index.ts");
-		const tunersDir = join(root, "tuners");
-		await import("node:fs/promises").then((fs) => fs.mkdir(tunersDir, { recursive: true }));
-
-		// Point root index.ts to project host
-		await writeFile(
-			indexPath,
-			`
-import { createProviderKitHost } from "${join(import.meta.dirname, "../index.ts")}";
-export default createProviderKitHost({ enableOfficialPricingFallback: false });
-`,
-		);
-
-		// Helper to resolve manifest files in the root dir
-		const resolveFiles = async () => {
-			const files: string[] = [indexPath];
-			const tunerFiles = await import("node:fs/promises").then((fs) => fs.readdir(tunersDir).catch(() => []));
-			for (const f of tunerFiles) {
-				if (f.endsWith(".ts")) files.push(join(tunersDir, f));
-			}
-			return files;
-		};
-
-		// 1. Initial load without tuners
-		const initialFiles = await resolveFiles();
-		const initialLoad = await discoverAndLoadExtensions(initialFiles, root, root);
-		assert.equal(initialLoad.extensions.length, 1);
-		assert.equal(initialLoad.errors.length, 0);
-
-		// 2. Add dynamic tuner via file drop-in
-		const dynamicTunerPath = join(tunersDir, "dynamic.ts");
-		await writeFile(
-			dynamicTunerPath,
-			`
-import { defineTunerExtension } from "${join(import.meta.dirname, "../index.ts")}";
-export default defineTunerExtension({
-  id: "dynamic-manifest-tuner",
-  priority: 10,
-  create: () => ({
-    id: "dynamic-manifest-tuner",
-    matches: () => true,
-    transform: (payload) => ({ ...payload, manifestTunerActive: true }),
-  }),
-});
-`,
-		);
-
-		// Reload step via discoverAndLoadExtensions
-		const loadedFiles = await resolveFiles();
-		const reloaded = await discoverAndLoadExtensions(loadedFiles, root, root);
-		assert.equal(reloaded.extensions.length, 2);
-		assert.equal(reloaded.errors.length, 0);
-
-		// 3. Remove tuner file and reload again
-		await rm(dynamicTunerPath);
-		const cleanedFiles = await resolveFiles();
-		const finalLoad = await discoverAndLoadExtensions(cleanedFiles, root, root);
-		assert.equal(finalLoad.extensions.length, 1);
-		assert.equal(finalLoad.errors.length, 0);
-	} finally {
-		await rm(root, { recursive: true, force: true });
 	}
 });

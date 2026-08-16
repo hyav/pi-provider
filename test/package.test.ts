@@ -8,8 +8,14 @@ import { discoverAndLoadExtensions } from "@earendil-works/pi-coding-agent";
 const packageRoot = fileURLToPath(new URL("..", import.meta.url));
 const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as {
 	files?: string[];
+	dependencies?: Record<string, string>;
 	peerDependencies?: Record<string, string>;
+	pi?: { extensions?: string[] };
 };
+
+test("publishes one Pi extension entrypoint for the Provider Kit package", () => {
+	assert.deepEqual(packageJson.pi?.extensions, ["./index.ts"]);
+});
 
 test("does not publish local private provider adapters", () => {
 	assert.ok(!packageJson.files?.includes("pi-provider"));
@@ -21,6 +27,10 @@ test("declares Pi-bundled runtime packages as open peers", () => {
 		"@earendil-works/pi-coding-agent": "*",
 		"@earendil-works/pi-tui": "*",
 	});
+});
+
+test("declares the adapter module loader as a runtime dependency", () => {
+	assert.equal(packageJson.dependencies?.jiti, "^2.7.0");
 });
 
 test("typechecks the optional local private overlay when it is present", () => {

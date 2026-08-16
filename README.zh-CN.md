@@ -9,7 +9,7 @@
 ## 核心能力
 
 - 由一个 Provider Kit Host 统一负责注册、Status、Preflight、实时检查和请求 Tuner
-- 通过 manifest 发现 Provider、Status、Preflight 和 Tuner Adapter，并在 `/reload` 后重新加载
+- 由单一 Pi 入口在 `/reload` 时发现 Provider、Status、Preflight 和 Tuner Adapter 文件
 - 通过缓存回退、有界后台刷新和失败保留提供可靠的模型目录
 - 优先采用 Provider 价格元数据，并可由 OpenRouter 补全价格和质量指标
 - 显式诊断：缓存 `/status`、免费 `/status refresh` 和可能计费的 `/status check`
@@ -48,9 +48,9 @@ pi install npm:@hyav/pi-provider
 | `HYPER_API_KEY` | Charm Hyper API Key 鉴权需要 | 无 | 为内置 `charm-hyper` Provider 提供凭据；OAuth 用户可以使用 `/login` |
 | `PI_CODING_AGENT_DIR` | 否 | `~/.pi/agent` | 修改公开 OpenRouter 元数据缓存的基础目录 |
 
-程序化集成可以通过 `createProviderKitRuntime()` 或 `createProviderKitHost()` 配置价格回退、价格策略、请求超时、元数据 URL 和缓存路径。源码定义 [`ProviderKitDependencies`](core/runtime-config.ts) 是权威依据。
+程序化集成可以通过 `createProviderKitRuntime()` 或 `createProviderKitHost()` 配置价格回退、价格策略、请求超时、元数据 URL 和缓存路径；使用自定义 capability 根目录的 Host 包可以调用 `createProviderKitExtension({ adapterRoot, dependencies })`。源码定义 [`ProviderKitDependencies`](core/runtime-config.ts) 是权威依据。
 
-可信包可以通过 manifest 中的 `providers/`、`status/`、`preflight/` 和 `tuners/` 条目添加 Adapter。Helper、校验、冲突、reload 行为和生命周期边界见 [Adapter Extension 契约](https://github.com/hyav/pi-provider/blob/main/docs/adapter-extensions.zh-CN.md)。根目录 [`index.ts`](index.ts) 定义公开 TypeScript 导出。
+在 `@hyav/pi-provider` 的 `providers/`、`status/`、`preflight/` 或 `tuners/` 目录增删 Adapter 文件后，执行 `/reload` 即可重新发现，无需修改 `index.ts`。独立的可信 Adapter 包仍通过自身 Pi manifest 声明 capability 入口。Helper、校验、冲突、reload 行为和生命周期边界见 [Adapter Extension 契约](https://github.com/hyav/pi-provider/blob/main/docs/adapter-extensions.zh-CN.md)。根目录 [`index.ts`](index.ts) 定义公开 TypeScript 导出。
 
 ## 使用须知
 

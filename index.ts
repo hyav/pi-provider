@@ -1,4 +1,7 @@
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { loadPackageAdapterExtensions } from "./core/adapter-loader.ts";
 import { createProviderKitHost } from "./core/host.ts";
+import type { ProviderKitDependencies } from "./core/runtime-config.ts";
 
 export type {
 	AdapterExtensionContext,
@@ -105,4 +108,22 @@ export type {
 	TunerContext,
 } from "./core/types.ts";
 
-export default createProviderKitHost();
+export interface ProviderKitExtensionOptions {
+	/** Package root containing providers, status, preflight, and tuners directories. */
+	adapterRoot?: string;
+	/** Host runtime dependency overrides. */
+	dependencies?: Partial<ProviderKitDependencies>;
+}
+
+/** Create one Pi extension that discovers the current Adapter files when it loads. */
+export function createProviderKitExtension(
+	options: ProviderKitExtensionOptions = {},
+): (pi: ExtensionAPI) => Promise<void> {
+	const providerKitHost = createProviderKitHost(options.dependencies);
+	return async (pi) => {
+		providerKitHost(pi);
+		await loadPackageAdapterExtensions(pi, options.adapterRoot);
+	};
+}
+
+export default createProviderKitExtension();

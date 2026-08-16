@@ -9,7 +9,7 @@ A provider extension toolkit for [Pi](https://pi.dev). It registers LLM provider
 ## Highlights
 
 - One Provider Kit Host for registration, status, preflight checks, live checks, and request tuners
-- Manifest-discovered provider, status, preflight, and tuner adapters reloaded with `/reload`
+- Provider, status, preflight, and tuner Adapter files discovered by one Pi entrypoint on `/reload`
 - Resilient model catalogs with cached fallback, bounded background refresh, and failure retention
 - Provider-first pricing metadata with optional OpenRouter completion and quality indicators
 - Explicit diagnostics: cached `/status`, free `/status refresh`, and potentially billable `/status check`
@@ -48,9 +48,9 @@ Use `/status refresh` for free endpoint, authentication, catalog, and account ch
 | `HYPER_API_KEY` | For Charm Hyper API-key auth | None | Supplies the built-in `charm-hyper` provider credential; OAuth users may use `/login` |
 | `PI_CODING_AGENT_DIR` | No | `~/.pi/agent` | Changes the base directory for public OpenRouter metadata cache |
 
-Programmatic integrations can configure pricing fallback, pricing policies, request timeouts, metadata URLs, and cache paths through `createProviderKitRuntime()` or `createProviderKitHost()`. The source definition [`ProviderKitDependencies`](core/runtime-config.ts) is authoritative.
+Programmatic integrations can configure pricing fallback, pricing policies, request timeouts, metadata URLs, and cache paths through `createProviderKitRuntime()` or `createProviderKitHost()`. Host packages with a custom capability root can call `createProviderKitExtension({ adapterRoot, dependencies })`. The source definition [`ProviderKitDependencies`](core/runtime-config.ts) is authoritative.
 
-Trusted packages can add adapters through manifest entries under `providers/`, `status/`, `preflight/`, and `tuners/`. See the [adapter extension contract](https://github.com/hyav/pi-provider/blob/main/docs/adapter-extensions.md) for helpers, validation, conflicts, reload behavior, and lifecycle boundaries. The root [`index.ts`](index.ts) defines the public TypeScript exports.
+Add or remove Adapter files under `@hyav/pi-provider`'s `providers/`, `status/`, `preflight/`, or `tuners/` directories, then run `/reload` to rediscover them without changing `index.ts`. Standalone trusted Adapter packages still declare their capability entries in their own Pi manifest. See the [adapter extension contract](https://github.com/hyav/pi-provider/blob/main/docs/adapter-extensions.md) for helpers, validation, conflicts, reload behavior, and lifecycle boundaries. The root [`index.ts`](index.ts) defines the public TypeScript exports.
 
 ## Before you use it
 

@@ -27,21 +27,17 @@ package-root/
   tuners/*.ts              # Tuner Adapter Extensions
 ```
 
-`package.json` 使用 Pi 官方清单规范。Host 包声明全部 capability 入口：
+Host 包仅向 Pi 声明根入口。根入口在启动和 `/reload` 时扫描自身 capability 目录，因此 Pi 将整个 Host 包显示为一个 extension，同时仍能通过增删文件扩展能力：
 
 ```json
 {
   "pi": {
-    "extensions": [
-      "./index.ts",
-      "./providers/*.ts",
-      "./status/*.ts",
-      "./preflight/*.ts",
-      "./tuners/*.ts"
-    ]
+    "extensions": ["./index.ts"]
   }
 }
 ```
+
+因此，`pi config` 只能整体启停 Host 包，不能单独启停其中的 capability 文件。需要独立启停的 Adapter 应放在独立 Adapter 包中。
 
 独立 Adapter 包仅声明自身包含的 capability 入口。从 `@hyav/pi-provider` 导入辅助函数的 npm Adapter 包必须同时在 `dependencies` 与 `bundledDependencies` 中声明：
 
@@ -63,7 +59,7 @@ package-root/
 }
 ```
 
-被通配符匹配的文件必须默认导出（default export）Pi extension factory。独立 Adapter 包禁止重复声明或二次执行 Host 的 `index.ts`。
+Host capability 目录中的文件与独立包中被通配符匹配的文件都必须默认导出（default export）Pi extension factory。独立 Adapter 包禁止重复声明或二次执行 Host 的 `index.ts`。
 
 只有由 Pi 提供的核心 Host 包才应使用值为 `"*"` 的 `peerDependencies`。
 
@@ -91,12 +87,12 @@ export default defineProviderExtension({
 - Preflight: `id`, `providerId`
 - Tuner: `id`
 
-Helper 会在实例化前校验静态身份描述符，并确认最终 Adapter 身份一致。Adapter ID 必须是非空、非空白且稳定的标识符；可以提供 named export 供程序化调用，但 default export 才是 Pi loader 的契约。
+Helper 会在实例化前校验静态身份描述符，并确认最终 Adapter 身份一致。Adapter ID 必须是非空、非空白且稳定的标识符；可以提供 named export 供程序化调用，但 default export 是 Host 内部 loader 与独立包 Pi loader 的共同契约。
 
 ## 生命周期
 
 ### 1. Extension Factory 阶段
-Pi 在启动与 `/reload` 时重新执行所有 extension factory。适配器 helper 会：
+Pi 在启动与 `/reload` 时重新执行 Host 根 extension factory。根入口先创建 Host，再按确定性路径顺序扫描 capability 目录，以禁用模块缓存的方式加载每个当前存在的 `.ts` 或 `.js` 文件。独立 Adapter 包仍由 Pi 根据自身 manifest 加载。适配器 helper 会：
 
 1. 校验静态描述符；
 2. 实例化 Adapter；
@@ -115,7 +111,7 @@ Host 的排序规则为：
 - Tuner 先按递增 `priority` 排序，再按 Adapter ID 排序。
 
 ### 3. `session_shutdown` 与 `/reload`
-上一个 Host 会取消未完成请求、清空缓存与诊断状态并解绑监听器。每个 Pi runtime 只支持一个活动 Host。`/reload` 重新扫描清单文件并构建全新 Host 实例：
+上一个 Host 会取消未完成请求、清空缓存与诊断状态并解绑监听器。每个 Pi runtime 只支持一个活动 Host。`/reload` 重新执行根入口、扫描当前 capability 文件并构建全新 Host 实例：
 
 - 新增文件在 reload 后生效；
 - 删除的文件在 reload 后清理；
@@ -126,5 +122,5 @@ Host 的排序规则为：
 - 缺失 ID、空白 ID、身份不匹配、无效时钟配置将使对应模块失效；
 - 重复 Adapter ID 或冲突绑定将被同时排除，防止因加载顺序造成隐式胜出；
 - Provider 冲突会清理动态覆盖，在存在原生 Provider 时恢复原生实现；
-- 模块抛出异常、注册信封损坏或 default export 缺失仅隔离该模块，不影响其他健康适配器；
+- 模块抛出异常、注册信封损坏或 default export 缺失仅隔离该模块，不影响其他健康适配器；加载失败使用 capability 相对路径报告，不暴露安装绝对路径；
 - Status 和 Preflight Adapter 可以绑定 Provider Kit Provider 或 Pi 原生 Provider。无法解析的绑定只隔离对应 Adapter，并报告诊断警告。
