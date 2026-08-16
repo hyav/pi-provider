@@ -25,7 +25,8 @@ export interface AdapterRootOptions {
 /** Built-in adapters always load first; user adapters load last so they can override. */
 export function resolveAdapterRoots(options: AdapterRootOptions): string[] {
 	const { packageRoot, agentDir, userRoot } = options;
-	const defaultUserRoot = agentDir !== undefined && agentDir !== "" ? join(agentDir, "extensions", "pi-provider") : undefined;
+	const defaultUserRoot =
+		agentDir !== undefined && agentDir !== "" ? join(agentDir, "extensions", "pi-provider") : undefined;
 	const resolvedUserRoot = userRoot ?? defaultUserRoot;
 	const roots = [packageRoot ?? defaultPackageRoot];
 	if (resolvedUserRoot !== undefined) roots.push(resolvedUserRoot);

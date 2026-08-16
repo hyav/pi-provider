@@ -1985,7 +1985,10 @@ test("programmatic defaults keep the agent-dir pricing cache path", () => {
 	try {
 		const deps = indexExports.getDefaultPiProviderDependencies();
 		assert.equal(deps.agentDir, agentDir);
-		assert.equal(deps.openRouterMetadataCachePath, join(agentDir, "extensions", "pi-provider", "openrouter-model-metadata.json"));
+		assert.equal(
+			deps.openRouterMetadataCachePath,
+			join(agentDir, "extensions", "pi-provider", "openrouter-model-metadata.json"),
+		);
 	} finally {
 		if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
 		else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
