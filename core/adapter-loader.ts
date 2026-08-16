@@ -17,7 +17,7 @@ function isAdapterFile(name: string): boolean {
 
 function warnAdapterLoadIssue(path: string, error: unknown): void {
 	const message = error instanceof Error ? error.message : String(error);
-	console.warn(`[provider-kit] failed to load adapter extension ${JSON.stringify(path)}: ${message}`);
+	console.warn(`[pi-provider] failed to load adapter extension ${JSON.stringify(path)}: ${message}`);
 }
 
 async function discoverAdapterPaths(root: string): Promise<string[]> {

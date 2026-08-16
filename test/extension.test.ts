@@ -4,8 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { visibleWidth } from "@earendil-works/pi-tui";
-import type { ProviderKitDefinition, ProviderKitDependencies } from "../core/extension.ts";
-import { createProviderKitRuntime } from "../core/extension.ts";
+import type { PiProviderDefinition, PiProviderDependencies } from "../core/extension.ts";
+import { createPiProviderRuntime } from "../core/extension.ts";
 import { clearPricingCache, OPENROUTER_MODELS_URL } from "../core/official-pricing.ts";
 import { StatusManager } from "../core/status-manager.ts";
 import type { ProviderAdapter, StatusSnapshot } from "../core/types.ts";
@@ -15,8 +15,8 @@ import { createCharmHyperAdapter } from "../providers/charm-hyper.ts";
 import { createCharmHyperStatusAdapter } from "../status/charm-hyper.ts";
 import { createOpenAICodexStatusAdapter } from "../status/openai-codex.ts";
 
-function createTestRuntime(dependencies: Partial<ProviderKitDependencies> = {}) {
-	return createProviderKitRuntime(
+function createTestRuntime(dependencies: Partial<PiProviderDependencies> = {}) {
+	return createPiProviderRuntime(
 		async (runtime) => ({
 			providers: [await createCharmHyperAdapter(runtime.fetch, runtime.modelDiscoveryTimeoutMs, runtime.now)],
 			statuses: [
@@ -40,7 +40,7 @@ function providerDefinition(
 	providerId: string,
 	statusFetch?: (context: any) => Promise<any>,
 	requestTimeoutMs = 1_000,
-): ProviderKitDefinition {
+): PiProviderDefinition {
 	return {
 		providers: [
 			{
@@ -92,9 +92,13 @@ function authContext(provider: string) {
 	};
 }
 
-test("exports core Provider Kit host and runtime APIs", () => {
-	assert.equal(typeof indexExports.createProviderKitHost, "function");
-	assert.equal(typeof indexExports.createProviderKitRuntime, "function");
+test("exports core Pi Provider host and runtime APIs without legacy aliases", () => {
+	const publicApi = indexExports as unknown as Record<string, unknown>;
+	assert.equal(typeof publicApi.createPiProviderHost, "function");
+	assert.equal(typeof publicApi.createPiProviderRuntime, "function");
+	const legacyInfix = ["Provider", "Kit"].join("");
+	assert.equal(publicApi[`create${legacyInfix}Host`], undefined);
+	assert.equal(publicApi[`create${legacyInfix}Runtime`], undefined);
 	assert.equal(typeof indexExports.defineProviderExtension, "function");
 	assert.equal(typeof indexExports.defineStatusExtension, "function");
 	assert.equal(typeof indexExports.definePreflightExtension, "function");
@@ -107,10 +111,10 @@ test("exports core Provider Kit host and runtime APIs", () => {
 	assert.equal(typeof indexExports.ProviderDataError, "function");
 });
 
-test("rejects invalid Provider Kit runtime dependencies early", () => {
+test("rejects invalid Pi Provider runtime dependencies early", () => {
 	assert.throws(
 		() =>
-			createProviderKitRuntime(async () => providerDefinition("invalid-runtime"), { liveCheckRequestTimeoutMs: 0 }),
+			createPiProviderRuntime(async () => providerDefinition("invalid-runtime"), { liveCheckRequestTimeoutMs: 0 }),
 		/valid timeout/,
 	);
 });
@@ -130,7 +134,7 @@ test("the runtime registers configured providers and exposes /status only", asyn
 test("schedules one non-blocking model catalog refresh for an explicit runtime", async () => {
 	const handlers: Record<string, (...args: any[]) => unknown> = {};
 	let refreshCalls = 0;
-	const extension = createProviderKitRuntime(async () => providerDefinition("catalog-runtime"), {
+	const extension = createPiProviderRuntime(async () => providerDefinition("catalog-runtime"), {
 		enableOfficialPricingFallback: false,
 	});
 	await extension({
@@ -154,7 +158,7 @@ test("schedules one non-blocking model catalog refresh for an explicit runtime",
 });
 
 test("reapplies background official metadata after startup registration", async () => {
-	const cacheRoot = await mkdtemp(join(tmpdir(), "pi-provider-kit-background-runtime-"));
+	const cacheRoot = await mkdtemp(join(tmpdir(), "pi-provider-background-runtime-"));
 	clearPricingCache(OPENROUTER_MODELS_URL);
 	let release: (() => void) | undefined;
 	let signalStarted: (() => void) | undefined;
@@ -183,7 +187,7 @@ test("reapplies background official metadata after startup registration", async 
 		);
 	}) as typeof globalThis.fetch;
 	let adapter: ProviderAdapter | undefined;
-	const extension = createProviderKitRuntime(
+	const extension = createPiProviderRuntime(
 		async () => {
 			adapter = {
 				id: "background-provider",
@@ -257,7 +261,7 @@ test("reapplies background official metadata after startup registration", async 
 
 test("offers filtered status mode completions with descriptions", async () => {
 	const commands: Record<string, any> = {};
-	await createProviderKitRuntime(async () => providerDefinition("completion-provider"), {
+	await createPiProviderRuntime(async () => providerDefinition("completion-provider"), {
 		enableOfficialPricingFallback: false,
 	})(createPi(commands) as any);
 
@@ -293,7 +297,7 @@ test("wires request tuners into before_provider_request when provided", async ()
 		matches: () => true,
 		transform: (payload: any) => ({ ...payload, customHeader: "active" }),
 	};
-	await createProviderKitRuntime(
+	await createPiProviderRuntime(
 		async () => ({
 			providers: [],
 			preflights: [],
@@ -323,7 +327,7 @@ test("wires request tuners into before_provider_request when provided", async ()
 
 test("normalizes incomplete provider models before registration", async () => {
 	const registrations: Array<{ id: string; config: any }> = [];
-	const extension = createProviderKitRuntime(
+	const extension = createPiProviderRuntime(
 		async () => ({
 			providers: [
 				{
@@ -363,7 +367,7 @@ test("normalizes incomplete provider models before registration", async () => {
 
 test("reports invalid status snapshots as badjson", async () => {
 	const commands: Record<string, any> = {};
-	const extension = createProviderKitRuntime(
+	const extension = createPiProviderRuntime(
 		async () =>
 			providerDefinition("invalid-status", async () => ({
 				entries: [{ kind: "window", id: "window", label: "5h", remainingPercent: Number.NaN }],
@@ -383,7 +387,7 @@ test("reports invalid status snapshots as badjson", async () => {
 
 test("rejects invalid status timeout settings while loading", async () => {
 	for (const requestTimeoutMs of [0, -1, Number.NaN, Number.POSITIVE_INFINITY, 1.5, 2_147_483_648]) {
-		const extension = createProviderKitRuntime(
+		const extension = createPiProviderRuntime(
 			async () =>
 				providerDefinition(
 					"invalid-timeout",
@@ -400,7 +404,7 @@ test("keeps default status cache-only and refreshes it explicitly", async () => 
 	const commands: Record<string, any> = {};
 	let requests = 0;
 	let now = 1_000;
-	const extension = createProviderKitRuntime(
+	const extension = createPiProviderRuntime(
 		async () =>
 			providerDefinition("cached-status", async (context) => ({
 				entries: [{ kind: "amount", id: "balance", label: "Balance", value: ++requests, unit: "credits" }],
@@ -431,7 +435,7 @@ test("keeps default status cache-only and refreshes it explicitly", async () => 
 test("distinguishes live and cached status reports with compact sections", async () => {
 	const commands: Record<string, any> = {};
 	let requests = 0;
-	const extension = createProviderKitRuntime(
+	const extension = createPiProviderRuntime(
 		async () =>
 			providerDefinition("status-presentation", async (context) => ({
 				entries: [{ kind: "amount", id: "balance", label: "Balance", value: ++requests, unit: "USD" }],
@@ -461,7 +465,7 @@ test("renders command status in a transient widget and clears it on input", asyn
 	const commands: Record<string, any> = {};
 	const handlers: Record<string, (...args: any[]) => unknown> = {};
 	const widgetUpdates: Array<{ key: string; content: unknown; options: unknown }> = [];
-	const extension = createProviderKitRuntime(
+	const extension = createPiProviderRuntime(
 		async () =>
 			providerDefinition("transient-status", async (context) => ({
 				entries: [{ kind: "amount", id: "balance", label: "Balance", value: 75, unit: "credits" }],
@@ -499,7 +503,7 @@ test("renders command status in a transient widget and clears it on input", asyn
 
 	assert.equal(notifications.length, 0);
 	assert.equal(widgetUpdates.length, 1);
-	assert.equal(widgetUpdates[0]?.key, "provider-kit-status");
+	assert.equal(widgetUpdates[0]?.key, "pi-provider-status");
 	assert.equal(typeof widgetUpdates[0]?.content, "function");
 	const widgetFactory = widgetUpdates[0]?.content as (
 		tui: unknown,
@@ -525,7 +529,7 @@ test("renders command status in a transient widget and clears it on input", asyn
 
 	await handlers.input?.({ type: "input", text: "next message", source: "interactive" }, ctx);
 
-	assert.equal(widgetUpdates.at(-1)?.key, "provider-kit-status");
+	assert.equal(widgetUpdates.at(-1)?.key, "pi-provider-status");
 	assert.equal(widgetUpdates.at(-1)?.content, undefined);
 });
 
@@ -534,7 +538,7 @@ test("runs account status and preflight checks concurrently", async () => {
 	const started = new Set<string>();
 	let resolveStatus: ((snapshot: unknown) => void) | undefined;
 	let resolvePreflight: ((snapshot: unknown) => void) | undefined;
-	const extension = createProviderKitRuntime(
+	const extension = createPiProviderRuntime(
 		async () =>
 			({
 				providers: [
@@ -598,7 +602,7 @@ test("runs account status, free preflight, and live check concurrently", async (
 	const started = new Set<string>();
 	let resolveStatus: ((snapshot: unknown) => void) | undefined;
 	let resolvePreflight: ((snapshot: unknown) => void) | undefined;
-	const extension = createProviderKitRuntime(
+	const extension = createPiProviderRuntime(
 		async () =>
 			({
 				providers: [
@@ -676,7 +680,7 @@ test("runs the live check with a fresh account status on /status check", async (
 	const commands: Record<string, any> = {};
 	let statusRequests = 0;
 	let liveCheckRequests = 0;
-	const extension = createProviderKitRuntime(
+	const extension = createPiProviderRuntime(
 		async () =>
 			providerDefinition("check-command", async () => {
 				statusRequests++;
@@ -708,7 +712,7 @@ test("runs the live check with a fresh account status on /status check", async (
 test("runs one minimal live check for the active provider and model on check", async () => {
 	const commands: Record<string, any> = {};
 	const liveCheckRequests: Array<{ model: any; context: any; options: any }> = [];
-	const extension = createProviderKitRuntime(async () => providerDefinition("check-provider"), {
+	const extension = createPiProviderRuntime(async () => providerDefinition("check-provider"), {
 		enableOfficialPricingFallback: false,
 		now: () => 1_000,
 	});
@@ -782,7 +786,7 @@ test("runs one minimal live check for the active provider and model on check", a
 	assert.match(notifications.at(-1) ?? "", /Live check: success · HTTP 200 OK · \d+ms/);
 	assert.match(
 		notifications.at(-1) ?? "",
-		/Live check scope: streamSimple\(\) · Provider Kit tuners only \(other hooks not replayed\)/,
+		/Live check scope: streamSimple\(\) · Pi Provider tuners only \(other hooks not replayed\)/,
 	);
 	assert.doesNotMatch(notifications.at(-1) ?? "", /Live check: model ·/);
 
@@ -798,7 +802,7 @@ test("passes the runtime fetch implementation to a live check", async () => {
 	const commands: Record<string, any> = {};
 	const runtimeFetch = (async () => new Response("unused")) as typeof globalThis.fetch;
 	let receivedFetch: typeof globalThis.fetch | undefined;
-	const extension = createProviderKitRuntime(async () => providerDefinition("check-fetch"), {
+	const extension = createPiProviderRuntime(async () => providerDefinition("check-fetch"), {
 		enableOfficialPricingFallback: false,
 		fetch: runtimeFetch,
 	});
@@ -828,7 +832,7 @@ test("does not start a provider stream after live check authentication times out
 	const auth = new Promise((resolve) => {
 		resolveAuth = resolve;
 	});
-	const extension = createProviderKitRuntime(async () => providerDefinition("late-check-auth"), {
+	const extension = createPiProviderRuntime(async () => providerDefinition("late-check-auth"), {
 		enableOfficialPricingFallback: false,
 		liveCheckRequestTimeoutMs: 5,
 	});
@@ -861,7 +865,7 @@ test("refreshes free preflight without running a paid live check", async () => {
 	let preflightRequests = 0;
 	let liveCheckRequests = 0;
 	let now = 1_000;
-	const extension = createProviderKitRuntime(
+	const extension = createPiProviderRuntime(
 		async () =>
 			({
 				providers: [
@@ -927,7 +931,7 @@ test("refreshes free preflight without running a paid live check", async () => {
 test("keeps preflight caches separate for each active model", async () => {
 	const commands: Record<string, any> = {};
 	let requests = 0;
-	const extension = createProviderKitRuntime(
+	const extension = createPiProviderRuntime(
 		async () =>
 			({
 				providers: [
@@ -979,7 +983,7 @@ test("keeps preflight caches separate for each active model", async () => {
 test("keeps the last successful live check when a later live check fails", async () => {
 	const commands: Record<string, any> = {};
 	let attempts = 0;
-	const extension = createProviderKitRuntime(async () => providerDefinition("stale-check"), {
+	const extension = createPiProviderRuntime(async () => providerDefinition("stale-check"), {
 		enableOfficialPricingFallback: false,
 	});
 	await extension(createPi(commands) as any);
@@ -1029,7 +1033,7 @@ test("respects Retry-After after a rate-limited live check", async () => {
 	const commands: Record<string, any> = {};
 	let attempts = 0;
 	let now = 1_000;
-	const extension = createProviderKitRuntime(async () => providerDefinition("retry-check"), {
+	const extension = createPiProviderRuntime(async () => providerDefinition("retry-check"), {
 		enableOfficialPricingFallback: false,
 		now: () => now,
 	});
@@ -1075,7 +1079,7 @@ test("respects Retry-After after a rate-limited live check", async () => {
 test("keeps live check caches separate for each active model", async () => {
 	const commands: Record<string, any> = {};
 	const checkedModels: string[] = [];
-	const extension = createProviderKitRuntime(async () => providerDefinition("model-isolated-check"), {
+	const extension = createPiProviderRuntime(async () => providerDefinition("model-isolated-check"), {
 		enableOfficialPricingFallback: false,
 	});
 	await extension(createPi(commands) as any);
@@ -1110,7 +1114,7 @@ test("keeps live check caches separate for each active model", async () => {
 
 test("keeps transient status failures informational when repeated", async () => {
 	const commands: Record<string, any> = {};
-	const extension = createProviderKitRuntime(
+	const extension = createPiProviderRuntime(
 		async () =>
 			providerDefinition("manual-warning", async () => {
 				throw new Error("temporary network failure");
@@ -1135,7 +1139,7 @@ test("keeps transient status failures informational when repeated", async () => 
 
 test("reports a live check timeout without hanging the check command", async () => {
 	const commands: Record<string, any> = {};
-	const extension = createProviderKitRuntime(async () => providerDefinition("timeout-check"), {
+	const extension = createPiProviderRuntime(async () => providerDefinition("timeout-check"), {
 		enableOfficialPricingFallback: false,
 		liveCheckRequestTimeoutMs: 5,
 	});
@@ -1166,7 +1170,7 @@ test("reports a live check timeout without hanging the check command", async () 
 test("rejects flag-style status modes without requesting status", async () => {
 	const commands: Record<string, any> = {};
 	let requests = 0;
-	const extension = createProviderKitRuntime(
+	const extension = createPiProviderRuntime(
 		async () =>
 			providerDefinition("invalid-status-mode", async () => {
 				requests++;
@@ -1279,7 +1283,7 @@ test("deduplicates concurrent status requests", async () => {
 	const commands: Record<string, any> = {};
 	let requests = 0;
 	let resolveStatus: ((snapshot: unknown) => void) | undefined;
-	const extension = createProviderKitRuntime(
+	const extension = createPiProviderRuntime(
 		async () =>
 			providerDefinition("dedup-status", async () => {
 				requests++;
@@ -1308,7 +1312,7 @@ test("keeps an in-flight status request when the model changes", async () => {
 	const started = new Promise<void>((resolve) => {
 		resolveStarted = resolve;
 	});
-	const extension = createProviderKitRuntime(
+	const extension = createPiProviderRuntime(
 		async () =>
 			providerDefinition("cancel-status", async (context) => {
 				resolveStarted?.();
@@ -1345,7 +1349,7 @@ test("clears status presentation on an expired model restore without requesting 
 	const commands: Record<string, any> = {};
 	let requests = 0;
 	let now = 1_000;
-	const extension = createProviderKitRuntime(
+	const extension = createPiProviderRuntime(
 		async () =>
 			providerDefinition("expired-selection", async (context) => ({
 				entries: [{ kind: "amount", id: "balance", label: "Balance", value: ++requests, unit: "credits" }],
@@ -1383,7 +1387,7 @@ test("clears status presentation on an expired model restore without requesting 
 
 test("does not warn when an active model has no auth configured", async () => {
 	const commands: Record<string, any> = {};
-	const extension = createProviderKitRuntime(
+	const extension = createPiProviderRuntime(
 		async () =>
 			providerDefinition("missing-auth", async () => ({
 				entries: [],
@@ -1412,7 +1416,7 @@ test("does not warn when an active model has no auth configured", async () => {
 test("does not query or show status for repeated model selections", async () => {
 	const handlers: Record<string, (...args: any[]) => unknown> = {};
 	let requests = 0;
-	const extension = createProviderKitRuntime(
+	const extension = createPiProviderRuntime(
 		async () =>
 			providerDefinition("warning-once", async () => {
 				requests++;
@@ -1447,7 +1451,7 @@ test("does not render cached status on model selection", async () => {
 	const handlers: Record<string, (...args: any[]) => unknown> = {};
 	const commands: Record<string, any> = {};
 	let requests = 0;
-	const extension = createProviderKitRuntime(
+	const extension = createPiProviderRuntime(
 		async () =>
 			providerDefinition("cached-selection", async (context) => ({
 				entries: [{ kind: "amount", id: "balance", label: "Balance", value: ++requests, unit: "credits" }],
@@ -1488,7 +1492,7 @@ test("does not render cached status on model selection", async () => {
 test("does not fetch or render status during model selection", async () => {
 	const handlers: Record<string, (...args: any[]) => unknown> = {};
 	let requests = 0;
-	const extension = createProviderKitRuntime(
+	const extension = createPiProviderRuntime(
 		async () =>
 			providerDefinition("selection-status", async () => {
 				requests++;
@@ -1518,7 +1522,7 @@ test("does not fetch or render status during model selection", async () => {
 test("keeps a stale status snapshot and recovers on a later query", async () => {
 	const commands: Record<string, any> = {};
 	let requests = 0;
-	const extension = createProviderKitRuntime(
+	const extension = createPiProviderRuntime(
 		async () =>
 			providerDefinition("recovering-status", async () => {
 				requests++;
@@ -1549,7 +1553,7 @@ test("keeps a stale status snapshot and recovers on a later query", async () => 
 test("does not query statuses during session lifecycle events", async () => {
 	const handlers: Record<string, (...args: any[]) => unknown> = {};
 	let requests = 0;
-	const extension = createProviderKitRuntime(
+	const extension = createPiProviderRuntime(
 		async () =>
 			providerDefinition("lifecycle-status", async () => {
 				requests++;
@@ -1602,7 +1606,7 @@ test("queries Charm Hyper status on demand", async () => {
 
 test("reports effective reasoning levels from Pi's sparse model map", async () => {
 	const commands: Record<string, any> = {};
-	const extension = createProviderKitRuntime(async () => providerDefinition("reasoning-provider"), {
+	const extension = createPiProviderRuntime(async () => providerDefinition("reasoning-provider"), {
 		enableOfficialPricingFallback: false,
 	});
 	await extension(createPi(commands) as any);
@@ -1744,7 +1748,7 @@ test("reports the native OpenAI Codex status without registering a fake provider
 test("shows quality and native field sources without replacing its price", async () => {
 	const commands: Record<string, any> = {};
 	const registrations: string[] = [];
-	const extension = createProviderKitRuntime(async () => providerDefinition("kit-provider"), {
+	const extension = createPiProviderRuntime(async () => providerDefinition("managed-provider"), {
 		officialPricingUrl: "https://reference.invalid/models",
 		fetch: async () =>
 			new Response(
@@ -1797,7 +1801,7 @@ test("shows quality and native field sources without replacing its price", async
 
 	await commands.status.handler("", ctx);
 	const report = notifications.at(-1) ?? "";
-	assert.deepEqual(registrations, ["kit-provider"]);
+	assert.deepEqual(registrations, ["managed-provider"]);
 	assert.match(report, /Context: 128k · Pi native/);
 	assert.match(report, /Max output: 16k · Pi native/);
 	assert.match(report, /Input: text · Pi native/);
@@ -1814,7 +1818,7 @@ test("shows quality and native field sources without replacing its price", async
 });
 
 test("updates native quality metrics after a non-blocking metadata refresh", async () => {
-	const root = await mkdtemp(join(tmpdir(), "pi-provider-kit-native-reference-"));
+	const root = await mkdtemp(join(tmpdir(), "pi-provider-native-reference-"));
 	clearPricingCache(OPENROUTER_MODELS_URL);
 	let release: (() => void) | undefined;
 	let signalStarted: (() => void) | undefined;
@@ -1845,7 +1849,7 @@ test("updates native quality metrics after a non-blocking metadata refresh", asy
 	}) as typeof globalThis.fetch;
 	try {
 		const commands: Record<string, any> = {};
-		const extension = createProviderKitRuntime(async () => providerDefinition("kit-provider"), {
+		const extension = createPiProviderRuntime(async () => providerDefinition("managed-provider"), {
 			fetch: fetchFn,
 			officialPricingCacheTtlMs: 0,
 			openRouterMetadataCachePath: join(root, "metadata.json"),
@@ -1899,7 +1903,7 @@ test("reports native Pi catalogs and local preflight without registering a dupli
 	const nativeProvider = {
 		getModels: () => [{ id: "native-model" }],
 	};
-	const extension = createProviderKitRuntime(async () => providerDefinition("kit-provider"), {
+	const extension = createPiProviderRuntime(async () => providerDefinition("managed-provider"), {
 		enableOfficialPricingFallback: false,
 	});
 	await extension(createPi(commands, registrations) as any);
@@ -1927,8 +1931,8 @@ test("reports native Pi catalogs and local preflight without registering a dupli
 
 	await commands.status.handler("", ctx);
 	const report = notifications.at(-1) ?? "";
-	assert.deepEqual(registrations, ["kit-provider"]);
+	assert.deepEqual(registrations, ["managed-provider"]);
 	assert.match(report, /Catalog:\n {2}Status: static · Pi native\n {2}Models: 1/);
 	assert.match(report, /Preflight: native · provider\/auth\/catalog/);
-	assert.doesNotMatch(report, /not managed by Provider Kit/);
+	assert.doesNotMatch(report, /not managed by Pi Provider/);
 });

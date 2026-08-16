@@ -2,7 +2,7 @@ import { validateAdapter } from "./adapter-validation.ts";
 import type { PreflightAdapter } from "./preflight-manager.ts";
 import type { ProviderAdapter, StatusAdapter, TunerAdapter } from "./types.ts";
 
-export interface ProviderKitDefinition {
+export interface PiProviderDefinition {
 	providers: ProviderAdapter[];
 	statuses?: StatusAdapter[];
 	preflights?: PreflightAdapter[];
@@ -24,15 +24,15 @@ function rejectDuplicate(ids: Set<string>, id: string, label: string): void {
  * Dynamic Hosts use the same adapter validators while resolving conflicts, but
  * keep invalid entries isolated instead of failing the whole registry.
  */
-export function validateProviderKitDefinition(value: unknown): asserts value is ProviderKitDefinition {
+export function validatePiProviderDefinition(value: unknown): asserts value is PiProviderDefinition {
 	if (value === null || typeof value !== "object" || Array.isArray(value)) {
-		throw new Error("Provider kit definition must be an object");
+		throw new Error("Pi Provider definition must be an object");
 	}
-	const definition = value as Partial<ProviderKitDefinition>;
-	assertArray(definition.providers, "Provider kit definition providers");
-	if (definition.statuses !== undefined) assertArray(definition.statuses, "Provider kit definition statuses");
-	if (definition.preflights !== undefined) assertArray(definition.preflights, "Provider kit definition preflights");
-	if (definition.tuners !== undefined) assertArray(definition.tuners, "Provider kit definition tuners");
+	const definition = value as Partial<PiProviderDefinition>;
+	assertArray(definition.providers, "Pi Provider definition providers");
+	if (definition.statuses !== undefined) assertArray(definition.statuses, "Pi Provider definition statuses");
+	if (definition.preflights !== undefined) assertArray(definition.preflights, "Pi Provider definition preflights");
+	if (definition.tuners !== undefined) assertArray(definition.tuners, "Pi Provider definition tuners");
 
 	const providerIds = new Set<string>();
 	for (const adapter of definition.providers) {

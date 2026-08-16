@@ -1,8 +1,8 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { readStoredCredential } from "@earendil-works/pi-coding-agent";
 import { wrapTextWithAnsi } from "@earendil-works/pi-tui";
-import type { ProviderKitDefinition } from "./definition.ts";
-import { validateProviderKitDefinition } from "./definition.ts";
+import type { PiProviderDefinition } from "./definition.ts";
+import { validatePiProviderDefinition } from "./definition.ts";
 import { LiveCheckManager, type LiveCheckResult } from "./live-check-manager.ts";
 import {
 	fetchOfficialPricing,
@@ -14,8 +14,8 @@ import {
 import type { PreflightContextLike } from "./preflight-manager.ts";
 import { PreflightManager } from "./preflight-manager.ts";
 import { refreshProviderRegistrations, registerProviderAdapter } from "./provider-registration.ts";
-import type { ProviderKitDependencies, ProviderKitLoader } from "./runtime-config.ts";
-import { resolveProviderKitDependencies } from "./runtime-config.ts";
+import type { PiProviderDependencies, PiProviderLoader } from "./runtime-config.ts";
+import { resolvePiProviderDependencies } from "./runtime-config.ts";
 import type { StatusContextLike } from "./status-manager.ts";
 import { StatusManager } from "./status-manager.ts";
 import {
@@ -39,7 +39,7 @@ type ActiveModel = NonNullable<ExtensionContext["model"]>;
 type StatusNotificationContext = Pick<ExtensionContext, "modelRegistry" | "ui"> & {
 	mode?: ExtensionContext["mode"];
 };
-const STATUS_WIDGET_KEY = "provider-kit-status";
+const STATUS_WIDGET_KEY = "pi-provider-status";
 
 function readProviderCredentialMetadata(provider: string): unknown {
 	try {
@@ -103,7 +103,7 @@ export function scheduleModelCatalogRefresh(ctx: Pick<ExtensionContext, "modelRe
 		.catch(() => undefined);
 }
 
-export interface ProviderKitRuntimeController {
+export interface PiProviderRuntimeController {
 	resetForSession(): void;
 	updateOfficialPricing?(snapshot: Record<string, OfficialModelMeta>): void;
 	shutdown(): void;
@@ -126,7 +126,7 @@ function cloneProviderCost(cost: ProviderCost): ProviderCost {
 
 function getOfficialMetadataStatus(
 	snapshot: Record<string, OfficialModelMeta>,
-	runtime: ProviderKitDependencies,
+	runtime: PiProviderDependencies,
 ): ModelMetadataStatus | undefined {
 	const source = runtime.officialPricingUrl === OPENROUTER_MODELS_URL ? "AA/OpenRouter" : "Official metadata";
 	if (!runtime.enableOfficialPricingFallback && Object.keys(snapshot).length === 0) return undefined;
@@ -185,17 +185,17 @@ function getNativeModelMetadata(
 	};
 }
 
-export function installProviderKitRuntime(
+export function installPiProviderRuntime(
 	pi: ExtensionAPI,
-	runtime: ProviderKitDependencies,
-	definition: ProviderKitDefinition,
+	runtime: PiProviderDependencies,
+	definition: PiProviderDefinition,
 	officialPricing: Record<string, OfficialModelMeta> = {},
 	options: {
 		registerHandlers?: boolean;
 		providerDrafts?: ReadonlyMap<ProviderAdapter, ProviderModelDraft[]>;
 	} = {},
-): ProviderKitRuntimeController {
-	validateProviderKitDefinition(definition);
+): PiProviderRuntimeController {
+	validatePiProviderDefinition(definition);
 	const registerHandlers = options.registerHandlers ?? true;
 	let currentOfficialPricing = officialPricing;
 	let currentOfficialMetadataStatus = getOfficialMetadataStatus(officialPricing, runtime);
@@ -387,7 +387,7 @@ export function installProviderKitRuntime(
 		liveCheckManager.clear();
 	};
 
-	const controller: ProviderKitRuntimeController = {
+	const controller: PiProviderRuntimeController = {
 		resetForSession,
 		updateOfficialPricing(snapshot) {
 			currentOfficialPricing = snapshot;
@@ -425,15 +425,15 @@ export function installProviderKitRuntime(
 	return controller;
 }
 
-export function createProviderKitRuntime(
-	loadDefinition: ProviderKitLoader,
-	dependencies: Partial<ProviderKitDependencies> = {},
+export function createPiProviderRuntime(
+	loadDefinition: PiProviderLoader,
+	dependencies: Partial<PiProviderDependencies> = {},
 ): (pi: ExtensionAPI) => Promise<void> {
-	const runtime = resolveProviderKitDependencies(dependencies);
+	const runtime = resolvePiProviderDependencies(dependencies);
 	return async (pi) => {
 		let latestBackgroundPricing: Record<string, OfficialModelMeta> | undefined;
-		let installedDefinition: ProviderKitDefinition | undefined;
-		let installedController: ProviderKitRuntimeController | undefined;
+		let installedDefinition: PiProviderDefinition | undefined;
+		let installedController: PiProviderRuntimeController | undefined;
 		let disposed = false;
 		const onBackgroundRefresh = (snapshot: Record<string, OfficialModelMeta>): void => {
 			latestBackgroundPricing = snapshot;
@@ -462,8 +462,8 @@ export function createProviderKitRuntime(
 			: Promise.resolve({});
 		const definitionPromise = loadDefinition(runtime);
 		const [officialPricing, definition] = await Promise.all([officialPricingPromise, definitionPromise]);
-		validateProviderKitDefinition(definition);
-		installedController = installProviderKitRuntime(pi, runtime, definition, officialPricing);
+		validatePiProviderDefinition(definition);
+		installedController = installPiProviderRuntime(pi, runtime, definition, officialPricing);
 		installedDefinition = definition;
 		if (latestBackgroundPricing !== undefined) onBackgroundRefresh(latestBackgroundPricing);
 		pi.on("session_shutdown", () => {

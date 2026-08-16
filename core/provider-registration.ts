@@ -1,7 +1,7 @@
 import type { ExtensionAPI, ProviderConfig } from "@earendil-works/pi-coding-agent";
 import { applyOfficialModelCosts, findOfficialMeta, type OfficialModelMeta } from "./official-pricing.ts";
 import { resolvePricingDetails } from "./pricing-adjustments.ts";
-import type { ProviderKitDependencies } from "./runtime-config.ts";
+import type { PiProviderDependencies } from "./runtime-config.ts";
 import type {
 	ProviderAdapter,
 	ProviderCost,
@@ -109,7 +109,7 @@ function selectPricingAdjustment(
 
 function resolveModelRegistration(
 	adapter: ProviderAdapter,
-	runtime: ProviderKitDependencies,
+	runtime: PiProviderDependencies,
 	modelDrafts: ProviderModelDraft[],
 	officialPricing: Record<string, OfficialModelMeta>,
 ): { models: ProviderModel[]; modelMetadata: Record<string, ProviderModelMetadata> } {
@@ -184,7 +184,7 @@ function getErrorCode(error: unknown): string {
  */
 export function prepareProviderRegistration(
 	adapter: ProviderAdapter,
-	runtime: ProviderKitDependencies,
+	runtime: PiProviderDependencies,
 	officialPricing: Record<string, OfficialModelMeta> = {},
 	modelDrafts?: ProviderModelDraft[],
 ): ProviderConfig {
@@ -239,7 +239,7 @@ export function prepareProviderRegistration(
 export function refreshProviderRegistrations(
 	pi: Pick<ExtensionAPI, "registerProvider">,
 	providers: readonly ProviderAdapter[],
-	runtime: ProviderKitDependencies,
+	runtime: PiProviderDependencies,
 	officialPricing: Record<string, OfficialModelMeta>,
 	providerDrafts?: ReadonlyMap<ProviderAdapter, ProviderModelDraft[]>,
 ): void {
@@ -251,7 +251,7 @@ export function refreshProviderRegistrations(
 export function registerProviderAdapter(
 	pi: Pick<ExtensionAPI, "registerProvider">,
 	adapter: ProviderAdapter,
-	runtime: ProviderKitDependencies,
+	runtime: PiProviderDependencies,
 	officialPricing: Record<string, OfficialModelMeta> = {},
 	modelDrafts?: ProviderModelDraft[],
 ): ProviderConfig {

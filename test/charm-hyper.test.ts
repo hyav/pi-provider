@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { prepareProviderRegistration } from "../core/provider-registration.ts";
-import { resolveProviderKitDependencies } from "../core/runtime-config.ts";
+import { resolvePiProviderDependencies } from "../core/runtime-config.ts";
 import type { ProviderRefreshContext } from "../core/types.ts";
 import {
 	createCharmHyperAdapter,
@@ -299,7 +299,7 @@ test("retains native OAuth when Charm Hyper is registered", () => {
 	const adapter = createCharmHyperAdapter(async () => new Response(JSON.stringify({ data: [{ id: "model" }] })), 100);
 	const registered = prepareProviderRegistration(
 		adapter,
-		resolveProviderKitDependencies({ enableOfficialPricingFallback: false }),
+		resolvePiProviderDependencies({ enableOfficialPricingFallback: false }),
 	);
 
 	assert.equal(adapter.provider.oauth?.name, "Charm Hyper");
@@ -360,7 +360,7 @@ test("keeps the fallback catalog state through Pi's cache-only refresh wrapper",
 	}, 5);
 	const registered = prepareProviderRegistration(
 		adapter,
-		resolveProviderKitDependencies({ enableOfficialPricingFallback: false }),
+		resolvePiProviderDependencies({ enableOfficialPricingFallback: false }),
 	);
 
 	await registered.refreshModels?.({ allowNetwork: false } as any);
@@ -375,7 +375,7 @@ test("preserves a failed catalog diagnostic through Pi's fallback refresh", asyn
 	}, 5);
 	const registered = prepareProviderRegistration(
 		adapter,
-		resolveProviderKitDependencies({ enableOfficialPricingFallback: false }),
+		resolvePiProviderDependencies({ enableOfficialPricingFallback: false }),
 	);
 	const refreshModels = registered.refreshModels;
 	assert.ok(refreshModels);

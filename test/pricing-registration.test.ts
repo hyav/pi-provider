@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { prepareProviderRegistration } from "../core/provider-registration.ts";
-import { getDefaultProviderKitDependencies } from "../core/runtime-config.ts";
+import { getDefaultPiProviderDependencies } from "../core/runtime-config.ts";
 import type { ProviderAdapter } from "../core/types.ts";
 
 function providerAdapter(): ProviderAdapter {
@@ -27,7 +27,7 @@ function providerAdapter(): ProviderAdapter {
 test("applies a runtime pricing policy to a Provider without adapter changes", () => {
 	const adapter = providerAdapter();
 	adapter.pricing = undefined;
-	const runtime = getDefaultProviderKitDependencies();
+	const runtime = getDefaultPiProviderDependencies();
 	runtime.pricingPolicies = {
 		"discounted-provider": {
 			defaultAdjustment: { multiplier: 0.8, label: "20% provider discount" },
@@ -49,7 +49,7 @@ test("matches pricing policies and metadata after normalizing model IDs", () => 
 	const adapter = providerAdapter();
 	adapter.pricing = undefined;
 	adapter.provider.models = [{ id: " model-alpha " }];
-	const runtime = getDefaultProviderKitDependencies();
+	const runtime = getDefaultPiProviderDependencies();
 	runtime.pricingPolicies = {
 		"discounted-provider": {
 			models: { "model-alpha": { multiplier: 0.5, label: "50% normalized model discount" } },
@@ -79,7 +79,7 @@ test("prioritizes model draft and runtime policy adjustments over adapter defaul
 			pricingAdjustment: { multiplier: 0.7, label: "30% model draft discount" },
 		},
 	];
-	const runtime = getDefaultProviderKitDependencies();
+	const runtime = getDefaultPiProviderDependencies();
 	runtime.pricingPolicies = {
 		"discounted-provider": {
 			defaultAdjustment: { multiplier: 0.9, label: "10% runtime default discount" },
@@ -119,7 +119,7 @@ test("keeps a Provider fallback as the effective base price", () => {
 			pricingSource: "fallback",
 		},
 	];
-	const registered = prepareProviderRegistration(adapter, getDefaultProviderKitDependencies(), {
+	const registered = prepareProviderRegistration(adapter, getDefaultPiProviderDependencies(), {
 		"model-alpha": { cost: { input: 5, output: 30, cacheRead: 0.5, cacheWrite: 6.25 } },
 	});
 
@@ -142,7 +142,7 @@ test("attaches quality metadata without replacing provider pricing", () => {
 			pricingSource: "provider",
 		},
 	];
-	const registered = prepareProviderRegistration(adapter, getDefaultProviderKitDependencies(), {
+	const registered = prepareProviderRegistration(adapter, getDefaultPiProviderDependencies(), {
 		"model-alpha": {
 			cost: { input: 5, output: 30, cacheRead: 0.5, cacheWrite: 6.25 },
 			quality: [
@@ -185,7 +185,7 @@ test("records the source of each registered model field", () => {
 			reasoning: false,
 		},
 	];
-	prepareProviderRegistration(adapter, getDefaultProviderKitDependencies(), {
+	prepareProviderRegistration(adapter, getDefaultPiProviderDependencies(), {
 		"model-alpha": {
 			cost: { input: 5, output: 30, cacheRead: 0.5, cacheWrite: 6.25 },
 			contextWindow: 1_000_000,
@@ -205,7 +205,7 @@ test("records the source of each registered model field", () => {
 
 test("keeps an explicit discount unavailable when no base price exists", () => {
 	const adapter = providerAdapter();
-	const registered = prepareProviderRegistration(adapter, getDefaultProviderKitDependencies());
+	const registered = prepareProviderRegistration(adapter, getDefaultPiProviderDependencies());
 
 	assert.deepEqual(registered.models?.[0]?.cost, {
 		input: 0,
@@ -231,7 +231,7 @@ test("refreshes the pricing sidecar when a dynamic catalog changes", async () =>
 	adapter.pricing = undefined;
 	adapter.provider.models = [{ id: "initial-model" }];
 	adapter.provider.refreshModels = async () => [{ id: "refreshed-model" }];
-	const registered = prepareProviderRegistration(adapter, getDefaultProviderKitDependencies(), {
+	const registered = prepareProviderRegistration(adapter, getDefaultPiProviderDependencies(), {
 		"refreshed-model": {
 			cost: { input: 1, output: 2, cacheRead: 0.1, cacheWrite: 0.25 },
 			quality: [
@@ -260,7 +260,7 @@ test("refreshes the pricing sidecar when a dynamic catalog changes", async () =>
 
 test("registers a discounted reference price and keeps pricing provenance", () => {
 	const adapter = providerAdapter();
-	const registered = prepareProviderRegistration(adapter, getDefaultProviderKitDependencies(), {
+	const registered = prepareProviderRegistration(adapter, getDefaultPiProviderDependencies(), {
 		"model-alpha": {
 			cost: { input: 5, output: 30, cacheRead: 0.5, cacheWrite: 6.25 },
 		},

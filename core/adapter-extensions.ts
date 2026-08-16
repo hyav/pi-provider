@@ -2,21 +2,21 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
 	type AdapterKind,
 	type AdapterRegistrationEnvelope,
-	PROVIDER_KIT_ADAPTER_EVENT,
-	PROVIDER_KIT_ADAPTER_PROTOCOL_VERSION,
-	PROVIDER_KIT_STARTUP_BRIDGE_EVENT,
+	PI_PROVIDER_ADAPTER_EVENT,
+	PI_PROVIDER_ADAPTER_PROTOCOL_VERSION,
+	PI_PROVIDER_STARTUP_BRIDGE_EVENT,
 	type StartupBridge,
 	type StartupBridgeRequest,
 } from "./adapter-protocol.ts";
 import { isStableAdapterId, validateAdapter, validateAdapterIdentity } from "./adapter-validation.ts";
 import type { PreflightAdapter } from "./preflight-manager.ts";
 import { registerProviderAdapter } from "./provider-registration.ts";
-import type { ProviderKitDependencies } from "./runtime-config.ts";
-import { getDefaultProviderKitDependencies } from "./runtime-config.ts";
+import type { PiProviderDependencies } from "./runtime-config.ts";
+import { getDefaultPiProviderDependencies } from "./runtime-config.ts";
 import type { ProviderAdapter, StatusAdapter, TunerAdapter } from "./types.ts";
 
 /** Context supplied to an Adapter Extension factory. */
-export interface AdapterExtensionContext extends ProviderKitDependencies {
+export interface AdapterExtensionContext extends PiProviderDependencies {
 	/** The Pi API that owns this extension factory. */
 	pi: ExtensionAPI;
 }
@@ -52,19 +52,19 @@ function validateStaticIdentity(kind: AdapterKind, id: string, providerId?: stri
 
 function getStartupBridge(pi: ExtensionAPI): StartupBridge {
 	const request: StartupBridgeRequest = {};
-	pi.events.emit(PROVIDER_KIT_STARTUP_BRIDGE_EVENT, request);
+	pi.events.emit(PI_PROVIDER_STARTUP_BRIDGE_EVENT, request);
 	return (
 		request.bridge ?? {
-			dependencies: getDefaultProviderKitDependencies(),
+			dependencies: getDefaultPiProviderDependencies(),
 			officialPricing: Promise.resolve({}),
 		}
 	);
 }
 
 function emitRegistration(pi: ExtensionAPI, envelope: AdapterRegistrationEnvelope): void {
-	pi.events.emit(PROVIDER_KIT_ADAPTER_EVENT, envelope);
+	pi.events.emit(PI_PROVIDER_ADAPTER_EVENT, envelope);
 	pi.on("session_start", () => {
-		pi.events.emit(PROVIDER_KIT_ADAPTER_EVENT, envelope);
+		pi.events.emit(PI_PROVIDER_ADAPTER_EVENT, envelope);
 	});
 }
 
@@ -94,7 +94,7 @@ function createAdapterExtension<TAdapter extends ProviderAdapter | StatusAdapter
 			// loaded later can recreate the adapter with its configured runtime.
 			registerProviderAdapter(pi, providerAdapter, bridge.dependencies, {}, modelDrafts);
 			emitRegistration(pi, {
-				version: PROVIDER_KIT_ADAPTER_PROTOCOL_VERSION,
+				version: PI_PROVIDER_ADAPTER_PROTOCOL_VERSION,
 				kind: "provider",
 				id,
 				token,
@@ -110,7 +110,7 @@ function createAdapterExtension<TAdapter extends ProviderAdapter | StatusAdapter
 			validateAdapter("status", statusAdapter);
 			validateAdapterIdentity("status", id, providerId, statusAdapter);
 			emitRegistration(pi, {
-				version: PROVIDER_KIT_ADAPTER_PROTOCOL_VERSION,
+				version: PI_PROVIDER_ADAPTER_PROTOCOL_VERSION,
 				kind: "status",
 				id,
 				providerId: providerId!,
@@ -126,7 +126,7 @@ function createAdapterExtension<TAdapter extends ProviderAdapter | StatusAdapter
 			validateAdapter("preflight", preflightAdapter);
 			validateAdapterIdentity("preflight", id, providerId, preflightAdapter);
 			emitRegistration(pi, {
-				version: PROVIDER_KIT_ADAPTER_PROTOCOL_VERSION,
+				version: PI_PROVIDER_ADAPTER_PROTOCOL_VERSION,
 				kind: "preflight",
 				id,
 				providerId: providerId!,
@@ -141,7 +141,7 @@ function createAdapterExtension<TAdapter extends ProviderAdapter | StatusAdapter
 		validateAdapter("tuner", tunerAdapter);
 		validateAdapterIdentity("tuner", id, tunerAdapter);
 		emitRegistration(pi, {
-			version: PROVIDER_KIT_ADAPTER_PROTOCOL_VERSION,
+			version: PI_PROVIDER_ADAPTER_PROTOCOL_VERSION,
 			kind: "tuner",
 			id,
 			token,

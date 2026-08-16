@@ -1,10 +1,10 @@
 import { isValidTimeoutMs } from "./deadline.ts";
-import type { ProviderKitDefinition } from "./definition.ts";
+import type { PiProviderDefinition } from "./definition.ts";
 import { getDefaultOpenRouterMetadataCachePath, OPENROUTER_MODELS_URL } from "./official-pricing.ts";
 import { validatePricingPolicy } from "./pricing-adjustments.ts";
 import type { ProviderPricingPolicy } from "./types.ts";
 
-export interface ProviderKitDependencies {
+export interface PiProviderDependencies {
 	fetch: typeof globalThis.fetch;
 	now: () => number;
 	modelDiscoveryTimeoutMs: number;
@@ -17,13 +17,13 @@ export interface ProviderKitDependencies {
 	/** Persistent cache for OpenRouter metadata used by the pricing fallback. */
 	openRouterMetadataCachePath: string;
 	enableOfficialPricingFallback: boolean;
-	/** Optional Provider Kit-level price policies keyed by Provider ID. */
+	/** Optional Pi Provider-level price policies keyed by Provider ID. */
 	pricingPolicies?: Record<string, ProviderPricingPolicy>;
 }
 
-export type ProviderKitLoader = (runtime: ProviderKitDependencies) => Promise<ProviderKitDefinition>;
+export type PiProviderLoader = (runtime: PiProviderDependencies) => Promise<PiProviderDefinition>;
 
-const defaultDependencies: ProviderKitDependencies = {
+const defaultDependencies: PiProviderDependencies = {
 	fetch: globalThis.fetch,
 	now: Date.now,
 	modelDiscoveryTimeoutMs: 3_000,
@@ -38,37 +38,37 @@ const defaultDependencies: ProviderKitDependencies = {
 	pricingPolicies: {},
 };
 
-export function getDefaultProviderKitDependencies(): ProviderKitDependencies {
+export function getDefaultPiProviderDependencies(): PiProviderDependencies {
 	return { ...defaultDependencies };
 }
 
-export function validateProviderKitDependencies(runtime: ProviderKitDependencies): void {
-	if (typeof runtime.fetch !== "function") throw new Error("Provider Kit fetch must be a function");
-	if (typeof runtime.now !== "function") throw new Error("Provider Kit now must be a function");
+export function validatePiProviderDependencies(runtime: PiProviderDependencies): void {
+	if (typeof runtime.fetch !== "function") throw new Error("Pi Provider fetch must be a function");
+	if (typeof runtime.now !== "function") throw new Error("Pi Provider now must be a function");
 	for (const [name, value] of [
 		["modelDiscoveryTimeoutMs", runtime.modelDiscoveryTimeoutMs],
 		["statusRequestTimeoutMs", runtime.statusRequestTimeoutMs],
 		["liveCheckRequestTimeoutMs", runtime.liveCheckRequestTimeoutMs],
 		["officialPricingTimeoutMs", runtime.officialPricingTimeoutMs],
 	] as const) {
-		if (!isValidTimeoutMs(value)) throw new Error(`Provider Kit ${name} must be a valid timeout`);
+		if (!isValidTimeoutMs(value)) throw new Error(`Pi Provider ${name} must be a valid timeout`);
 	}
 	for (const [name, value] of [
 		["officialPricingCacheTtlMs", runtime.officialPricingCacheTtlMs],
 		["officialPricingMaxStaleMs", runtime.officialPricingMaxStaleMs],
 	] as const) {
 		if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
-			throw new Error(`Provider Kit ${name} must be a finite non-negative number`);
+			throw new Error(`Pi Provider ${name} must be a finite non-negative number`);
 		}
 	}
 	if (typeof runtime.officialPricingUrl !== "string" || runtime.officialPricingUrl.trim() === "") {
-		throw new Error("Provider Kit officialPricingUrl must be a non-empty string");
+		throw new Error("Pi Provider officialPricingUrl must be a non-empty string");
 	}
 	if (typeof runtime.openRouterMetadataCachePath !== "string" || runtime.openRouterMetadataCachePath.trim() === "") {
-		throw new Error("Provider Kit openRouterMetadataCachePath must be a non-empty path");
+		throw new Error("Pi Provider openRouterMetadataCachePath must be a non-empty path");
 	}
 	if (typeof runtime.enableOfficialPricingFallback !== "boolean") {
-		throw new Error("Provider Kit enableOfficialPricingFallback must be a boolean");
+		throw new Error("Pi Provider enableOfficialPricingFallback must be a boolean");
 	}
 	if (runtime.pricingPolicies !== undefined) {
 		if (
@@ -76,20 +76,20 @@ export function validateProviderKitDependencies(runtime: ProviderKitDependencies
 			typeof runtime.pricingPolicies !== "object" ||
 			Array.isArray(runtime.pricingPolicies)
 		) {
-			throw new Error("Provider Kit pricingPolicies must be an object");
+			throw new Error("Pi Provider pricingPolicies must be an object");
 		}
 		for (const [providerId, policy] of Object.entries(runtime.pricingPolicies)) {
-			if (providerId.trim() === "") throw new Error("Provider Kit pricingPolicies has an empty Provider ID");
-			validatePricingPolicy(policy, `Provider Kit pricingPolicies.${providerId}`);
+			if (providerId.trim() === "") throw new Error("Pi Provider pricingPolicies has an empty Provider ID");
+			validatePricingPolicy(policy, `Pi Provider pricingPolicies.${providerId}`);
 		}
 	}
 }
 
-export function resolveProviderKitDependencies(
-	dependencies: Partial<ProviderKitDependencies> = {},
-): ProviderKitDependencies {
+export function resolvePiProviderDependencies(
+	dependencies: Partial<PiProviderDependencies> = {},
+): PiProviderDependencies {
 	const runtime = { ...defaultDependencies, ...dependencies };
 	if (runtime.pricingPolicies === undefined) runtime.pricingPolicies = {};
-	validateProviderKitDependencies(runtime);
+	validatePiProviderDependencies(runtime);
 	return runtime;
 }

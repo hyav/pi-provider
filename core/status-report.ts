@@ -264,7 +264,7 @@ function formatCatalog(
 	now: number,
 ): { lines: string[]; issue: ReportIssue } {
 	if (!adapter) {
-		if (!nativeLookupAvailable) return { lines: ["Status: not managed by Provider Kit"], issue: { level: "none" } };
+		if (!nativeLookupAvailable) return { lines: ["Status: not managed by Pi Provider"], issue: { level: "none" } };
 		if (!nativeProvider) return { lines: ["Status: unavailable in Pi"], issue: { level: "none" } };
 		const count = getNativeModelCount(nativeProvider);
 		return {
@@ -482,7 +482,7 @@ function appendLiveCheckReport(
 		return { level: "none" };
 	}
 	if (options.showScope) {
-		lines.push("Live check scope: streamSimple() · Provider Kit tuners only (other hooks not replayed)");
+		lines.push("Live check scope: streamSimple() · Pi Provider tuners only (other hooks not replayed)");
 	}
 	if (diagnostics?.pending) lines.push("Availability: checking");
 	else if (!diagnostics?.snapshot && !diagnostics?.lastError) lines.push("Availability: not checked");

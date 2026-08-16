@@ -1,24 +1,24 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { OfficialModelMeta } from "./official-pricing.ts";
 import type { PreflightAdapter } from "./preflight-manager.ts";
-import type { ProviderKitDependencies } from "./runtime-config.ts";
+import type { PiProviderDependencies } from "./runtime-config.ts";
 import type { ProviderAdapter, ProviderModelDraft, StatusAdapter, TunerAdapter } from "./types.ts";
 
 /** Registration protocol version shared by Host and Adapter Extensions. */
-export const PROVIDER_KIT_ADAPTER_PROTOCOL_VERSION = 2 as const;
+export const PI_PROVIDER_ADAPTER_PROTOCOL_VERSION = 2 as const;
 
 /** Event-bus channel used for Adapter Extension registration envelopes. */
-export const PROVIDER_KIT_ADAPTER_EVENT = "provider-kit:adapter";
+export const PI_PROVIDER_ADAPTER_EVENT = "pi-provider:adapter";
 
 /** Event-bus channel used by the Host to expose the factory-stage startup bridge. */
-export const PROVIDER_KIT_STARTUP_BRIDGE_EVENT = "provider-kit:startup-bridge";
+export const PI_PROVIDER_STARTUP_BRIDGE_EVENT = "pi-provider:startup-bridge";
 
-/** Event-bus channel used to detect more than one Provider Kit Host. */
-export const PROVIDER_KIT_HOST_CLAIM_EVENT = "provider-kit:host-claim";
+/** Event-bus channel used to detect more than one Pi Provider Host. */
+export const PI_PROVIDER_HOST_CLAIM_EVENT = "pi-provider:host-claim";
 
 export type AdapterKind = "provider" | "status" | "preflight" | "tuner";
 
-export interface AdapterFactoryContext extends ProviderKitDependencies {
+export interface AdapterFactoryContext extends PiProviderDependencies {
 	pi: ExtensionAPI;
 }
 
@@ -32,14 +32,14 @@ export type AdapterFactory = (
 	| Promise<ProviderAdapter | StatusAdapter | PreflightAdapter | TunerAdapter>;
 
 export interface AdapterRegistrationEnvelopeBase {
-	version: typeof PROVIDER_KIT_ADAPTER_PROTOCOL_VERSION;
+	version: typeof PI_PROVIDER_ADAPTER_PROTOCOL_VERSION;
 	kind: AdapterKind;
 	id: string;
 	token: object;
 	/** Factory retained for Host-side rehydration when Host loaded after Adapter. */
 	factory: AdapterFactory;
 	/** Exact dependency object used by the initial factory invocation. */
-	startupDependencies: ProviderKitDependencies;
+	startupDependencies: PiProviderDependencies;
 }
 
 export interface ProviderAdapterRegistrationEnvelope extends AdapterRegistrationEnvelopeBase {
@@ -73,7 +73,7 @@ export type AdapterRegistrationEnvelope =
 	| TunerAdapterRegistrationEnvelope;
 
 export interface StartupBridge {
-	dependencies: ProviderKitDependencies;
+	dependencies: PiProviderDependencies;
 	officialPricing: Promise<Record<string, OfficialModelMeta>>;
 }
 
@@ -102,7 +102,7 @@ export function isAdapterRegistrationEnvelope(value: unknown): value is AdapterR
 	if (value === null || typeof value !== "object") return false;
 	const candidate = value as Partial<AdapterRegistrationEnvelope>;
 	return (
-		candidate.version === PROVIDER_KIT_ADAPTER_PROTOCOL_VERSION &&
+		candidate.version === PI_PROVIDER_ADAPTER_PROTOCOL_VERSION &&
 		(candidate.kind === "provider" ||
 			candidate.kind === "status" ||
 			candidate.kind === "preflight" ||

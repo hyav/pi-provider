@@ -16,5 +16,4 @@ pnpm-debug.log*
 .DS_Store
 
 # Maintainer-only local Provider overlay; never publish it
-/pi-provider-kit/
 /pi-provider/

@@ -1,7 +1,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { loadPackageAdapterExtensions } from "./core/adapter-loader.ts";
-import { createProviderKitHost } from "./core/host.ts";
-import type { ProviderKitDependencies } from "./core/runtime-config.ts";
+import { createPiProviderHost } from "./core/host.ts";
+import type { PiProviderDependencies } from "./core/runtime-config.ts";
 
 export type {
 	AdapterExtensionContext,
@@ -19,22 +19,22 @@ export {
 export type { ProviderDataErrorLike } from "./core/errors.ts";
 export { isProviderDataError, ProviderDataError } from "./core/errors.ts";
 export type {
-	ProviderKitDefinition,
-	ProviderKitDependencies,
-	ProviderKitLoader,
-	ProviderKitRuntimeController,
+	PiProviderDefinition,
+	PiProviderDependencies,
+	PiProviderLoader,
+	PiProviderRuntimeController,
 } from "./core/extension.ts";
 export {
-	createProviderKitRuntime,
-	getDefaultProviderKitDependencies,
-	installProviderKitRuntime,
+	createPiProviderRuntime,
+	getDefaultPiProviderDependencies,
+	installPiProviderRuntime,
 	prepareProviderRegistration,
 	registerProviderAdapter,
-	resolveProviderKitDependencies,
-	validateProviderKitDefinition,
-	validateProviderKitDependencies,
+	resolvePiProviderDependencies,
+	validatePiProviderDefinition,
+	validatePiProviderDependencies,
 } from "./core/extension.ts";
-export { createProviderKitHost } from "./core/host.ts";
+export { createPiProviderHost } from "./core/host.ts";
 export type {
 	LiveCheckContextLike,
 	LiveCheckDiagnostics,
@@ -108,22 +108,22 @@ export type {
 	TunerContext,
 } from "./core/types.ts";
 
-export interface ProviderKitExtensionOptions {
+export interface PiProviderExtensionOptions {
 	/** Package root containing providers, status, preflight, and tuners directories. */
 	adapterRoot?: string;
 	/** Host runtime dependency overrides. */
-	dependencies?: Partial<ProviderKitDependencies>;
+	dependencies?: Partial<PiProviderDependencies>;
 }
 
 /** Create one Pi extension that discovers the current Adapter files when it loads. */
-export function createProviderKitExtension(
-	options: ProviderKitExtensionOptions = {},
+export function createPiProviderExtension(
+	options: PiProviderExtensionOptions = {},
 ): (pi: ExtensionAPI) => Promise<void> {
-	const providerKitHost = createProviderKitHost(options.dependencies);
+	const piProviderHost = createPiProviderHost(options.dependencies);
 	return async (pi) => {
-		providerKitHost(pi);
+		piProviderHost(pi);
 		await loadPackageAdapterExtensions(pi, options.adapterRoot);
 	};
 }
 
-export default createProviderKitExtension();
+export default createPiProviderExtension();

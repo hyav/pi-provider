@@ -25,7 +25,7 @@
     "pi-package",
     "pi",
     "provider",
-    "provider-kit",
+    "pi-provider",
     "charm-hyper",
     "llm"
   ],
@@ -76,6 +76,6 @@
     "LICENSE"
   ],
   "dependencies": {
-    "jiti": "^2.7.0"
+    "jiti": "2.7.0"
   }
 }

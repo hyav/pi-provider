@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { discoverAndLoadExtensions } from "@earendil-works/pi-coding-agent";
@@ -13,13 +14,12 @@ const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.me
 	pi?: { extensions?: string[] };
 };
 
-test("publishes one Pi extension entrypoint for the Provider Kit package", () => {
+test("publishes one Pi extension entrypoint for the Pi Provider package", () => {
 	assert.deepEqual(packageJson.pi?.extensions, ["./index.ts"]);
 });
 
 test("does not publish local private provider adapters", () => {
 	assert.ok(!packageJson.files?.includes("pi-provider"));
-	assert.ok(!packageJson.files?.includes("pi-provider-kit"));
 });
 
 test("declares Pi-bundled runtime packages as open peers", () => {
@@ -29,12 +29,12 @@ test("declares Pi-bundled runtime packages as open peers", () => {
 	});
 });
 
-test("declares the adapter module loader as a runtime dependency", () => {
-	assert.equal(packageJson.dependencies?.jiti, "^2.7.0");
+test("pins the adapter module loader runtime dependency", () => {
+	assert.equal(packageJson.dependencies?.jiti, "2.7.0");
 });
 
 test("typechecks the optional local private overlay when it is present", () => {
-	if (!existsSync(`${packageRoot}/pi-provider-kit`)) return;
+	if (!existsSync(`${packageRoot}/pi-provider`)) return;
 	execFileSync(
 		"npx",
 		[
@@ -50,7 +50,7 @@ test("typechecks the optional local private overlay when it is present", () => {
 			"--esModuleInterop",
 			"--skipLibCheck",
 			"--allowImportingTsExtensions",
-			"pi-provider-kit/index.ts",
+			"pi-provider/index.ts",
 		],
 		{ cwd: packageRoot, stdio: "pipe" },
 	);
@@ -111,7 +111,23 @@ test("the npm tarball contains only public capability entrypoints", () => {
 	assert.ok(files.includes("LICENSE"));
 	assert.ok(!files.includes("CONTEXT.md"));
 	assert.ok(!files.some((path) => path.startsWith("docs/")));
-	assert.ok(!files.some((path) => path.startsWith("pi-provider-kit/")));
+	assert.ok(!files.some((path) => path.startsWith("pi-provider/")));
 	assert.ok(!files.some((path) => path.startsWith("pi-provider/")));
 	assert.ok(!files.some((path) => path.startsWith("test/")));
+});
+
+test("the npm tarball contains no legacy product terminology", () => {
+	const output = execFileSync("npm", ["pack", "--dry-run", "--json"], {
+		cwd: packageRoot,
+		encoding: "utf8",
+	});
+	const metadata = JSON.parse(output) as Array<{ files?: Array<{ path: string }> }>;
+	const files = metadata[0]?.files?.map(({ path }) => path) ?? [];
+	const legacyTerms = [["provider", "kit"].join(""), ["provider", "kit"].join("-"), ["provider", "kit"].join(" ")];
+	for (const path of files) {
+		const content = readFileSync(join(packageRoot, path), "utf8").toLowerCase();
+		for (const term of legacyTerms) {
+			assert.equal(content.includes(term), false, `${path} contains legacy product terminology`);
+		}
+	}
 });

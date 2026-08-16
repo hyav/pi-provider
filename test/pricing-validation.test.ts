@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { validateProviderAdapter } from "../core/adapter-validation.ts";
 import {
-	getDefaultProviderKitDependencies,
-	resolveProviderKitDependencies,
-	validateProviderKitDependencies,
+	getDefaultPiProviderDependencies,
+	resolvePiProviderDependencies,
+	validatePiProviderDependencies,
 } from "../core/runtime-config.ts";
 import type { ProviderAdapter } from "../core/types.ts";
 
@@ -27,16 +27,16 @@ test("rejects an invalid Provider pricing adjustment", () => {
 });
 
 test("accepts dependency objects created before runtime pricing policies existed", () => {
-	const legacyRuntime = getDefaultProviderKitDependencies();
+	const legacyRuntime = getDefaultPiProviderDependencies();
 	delete legacyRuntime.pricingPolicies;
 
-	assert.doesNotThrow(() => validateProviderKitDependencies(legacyRuntime));
+	assert.doesNotThrow(() => validatePiProviderDependencies(legacyRuntime));
 });
 
 test("rejects an invalid runtime pricing policy", () => {
 	assert.throws(
 		() =>
-			resolveProviderKitDependencies({
+			resolvePiProviderDependencies({
 				pricingPolicies: {
 					provider: { defaultAdjustment: { multiplier: -1, label: "invalid" } },
 				},

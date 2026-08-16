@@ -10,7 +10,7 @@ export type ThinkingLevel = ReturnType<ExtensionAPI["getThinkingLevel"]>;
 export type ProviderCost = ProviderModelConfig["cost"];
 export type ProviderModel = ProviderModelConfig;
 export type PricingSku = "input" | "output" | "cacheRead" | "cacheWrite";
-/** Pricing provenance used by Provider Kit sidecars; not added to Pi model objects. */
+/** Pricing provenance used by Pi Provider sidecars; not added to Pi model objects. */
 export type ProviderPricingSource = "provider" | "fallback" | "official";
 export type ModelPricingSource = ProviderPricingSource | "native";
 export type ModelFieldSource = ProviderPricingSource | "native" | "default";

@@ -2,25 +2,25 @@
 
 [English](adapter-extensions.md)
 
-本文定义 Provider Kit 动态扩展适配器的公共契约，描述其使用方式、生命周期和故障隔离边界。
+本文定义 Pi Provider 动态扩展适配器的公共契约，描述其使用方式、生命周期和故障隔离边界。
 
 ## 目标
 
-用户与开发者可以通过以下方式扩展 Provider Kit 能力，无需修改 Provider Kit 的 `index.ts`：
+用户与开发者可以通过以下方式扩展 Pi Provider 能力，无需修改 Pi Provider 的 `index.ts`：
 
 1. 在已安装包的对应 capability 目录中添加或删除 TypeScript 文件；
 2. 安装另一个本地、npm 或 Git Pi 扩展包；
 3. 执行 `/reload`。
 
-新发现的 Provider、Status、Preflight 与 Tuner 在 reload 后自动并入同一个 Provider Kit Host 实例。活动会话内不支持不经过 reload 的热替换。
+新发现的 Provider、Status、Preflight 与 Tuner 在 reload 后自动并入同一个 Pi Provider Host 实例。活动会话内不支持不经过 reload 的热替换。
 
 ## 包布局
 
-Provider Kit Host 包与独立的 Adapter 包均遵循标准 capability 目录约定：
+Pi Provider Host 包与独立的 Adapter 包均遵循标准 capability 目录约定：
 
 ```text
 package-root/
-  index.ts                 # Provider Kit Host（每个运行时唯一）
+  index.ts                 # Pi Provider Host（每个运行时唯一）
   providers/*.ts           # Provider Adapter Extensions
   status/*.ts              # Status Adapter Extensions
   preflight/*.ts           # Preflight Adapter Extensions
@@ -96,7 +96,7 @@ Pi 在启动与 `/reload` 时重新执行 Host 根 extension factory。根入口
 
 1. 校验静态描述符；
 2. 实例化 Adapter；
-3. 通过 Provider Kit startup bridge 调用 Pi 的 `registerProvider()`；
+3. 通过 Pi Provider startup bridge 调用 Pi 的 `registerProvider()`；
 4. 通过 `pi.events` 发布版本化注册信封（`version: 2`）；
 5. 注册同步的 `session_start` replay handler。
 
@@ -123,4 +123,4 @@ Host 的排序规则为：
 - 重复 Adapter ID 或冲突绑定将被同时排除，防止因加载顺序造成隐式胜出；
 - Provider 冲突会清理动态覆盖，在存在原生 Provider 时恢复原生实现；
 - 模块抛出异常、注册信封损坏或 default export 缺失仅隔离该模块，不影响其他健康适配器；加载失败使用 capability 相对路径报告，不暴露安装绝对路径；
-- Status 和 Preflight Adapter 可以绑定 Provider Kit Provider 或 Pi 原生 Provider。无法解析的绑定只隔离对应 Adapter，并报告诊断警告。
+- Status 和 Preflight Adapter 可以绑定由 Pi Provider 管理的 Provider 或 Pi 原生 Provider。无法解析的绑定只隔离对应 Adapter，并报告诊断警告。

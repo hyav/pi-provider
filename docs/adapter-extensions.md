@@ -1,24 +1,24 @@
 # Adapter Extension Design
 
-This document defines the public contract for dynamically discovered Provider Kit adapter extensions. It outlines extension usage, lifecycle states, and fault boundaries.
+This document defines the public contract for dynamically discovered Pi Provider adapter extensions. It outlines extension usage, lifecycle states, and fault boundaries.
 
 ## Goals
 
-Users and packages can share Provider Kit capabilities without modifying Provider Kit's `index.ts`:
+Users and packages can share Pi Provider capabilities without modifying Pi Provider's `index.ts`:
 
 1. Add or remove TypeScript files inside a package's capability directories;
 2. Install another local, npm, or Git Pi package;
 3. Execute `/reload`.
 
-Discovered Providers, Statuses, Preflights, and Tuners are incorporated into a single unified Provider Kit Host after reload. Hot swapping within an active session without a reload is intentionally not supported.
+Discovered Providers, Statuses, Preflights, and Tuners are incorporated into a single unified Pi Provider Host after reload. Hot swapping within an active session without a reload is intentionally not supported.
 
 ## Package Layout
 
-Both the Provider Kit Host package and standalone Adapter packages follow standard capability directory conventions:
+Both the Pi Provider Host package and standalone Adapter packages follow standard capability directory conventions:
 
 ```text
 package-root/
-  index.ts                 # Provider Kit Host (one per runtime)
+  index.ts                 # Pi Provider Host (one per runtime)
   providers/*.ts           # Provider Adapter Extensions
   status/*.ts              # Status Adapter Extensions
   preflight/*.ts           # Preflight Adapter Extensions
@@ -94,7 +94,7 @@ Pi re-executes the Host root extension factory upon startup and `/reload`. The r
 
 1. Validates the static descriptor;
 2. Instantiates the Adapter;
-3. Calls Pi's `registerProvider()` for Providers via the Provider Kit startup bridge;
+3. Calls Pi's `registerProvider()` for Providers via the Pi Provider startup bridge;
 4. Emits a versioned registration envelope (`version: 2`) across `pi.events`;
 5. Registers a synchronous `session_start` replay handler.
 
@@ -122,4 +122,4 @@ The previous Host aborts inflight requests, clears caches and diagnostics, and u
 - Duplicate Adapter IDs within the same capability or duplicate Status/Preflight bindings for the same Provider exclude all conflicting entries to prevent load-order ambiguity.
 - Provider conflicts clean up dynamic overrides, restoring native built-ins when present.
 - A missing default export, thrown factory exception, or corrupted envelope isolates only the failing file without impacting healthy adapters. Load failures use capability-relative paths instead of exposing absolute installation paths.
-- Status and Preflight adapters can bind to either Provider Kit Providers or native Pi Providers. Unresolvable bindings isolate the individual adapter and report diagnostic warnings.
+- Status and Preflight adapters can bind to providers managed by Pi Provider or to native Pi Providers. Unresolvable bindings isolate the individual adapter and report diagnostic warnings.

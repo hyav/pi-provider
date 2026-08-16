@@ -3,26 +3,26 @@ import {
 	type AdapterRegistrationEnvelope,
 	isAdapterRegistrationEnvelope,
 	isHostClaimRequest,
-	PROVIDER_KIT_ADAPTER_EVENT,
-	PROVIDER_KIT_HOST_CLAIM_EVENT,
-	PROVIDER_KIT_STARTUP_BRIDGE_EVENT,
+	PI_PROVIDER_ADAPTER_EVENT,
+	PI_PROVIDER_HOST_CLAIM_EVENT,
+	PI_PROVIDER_STARTUP_BRIDGE_EVENT,
 	type StartupBridge,
 	type StartupBridgeRequest,
 } from "./adapter-protocol.ts";
 import { validateAdapter, validateAdapterIdentity, validateProviderAdapter } from "./adapter-validation.ts";
-import { type ProviderKitDefinition, validateProviderKitDefinition } from "./definition.ts";
+import { type PiProviderDefinition, validatePiProviderDefinition } from "./definition.ts";
 import {
 	getStatusModeCompletions,
-	installProviderKitRuntime,
-	type ProviderKitRuntimeController,
+	installPiProviderRuntime,
+	type PiProviderRuntimeController,
 	prepareProviderRegistration,
 } from "./extension.ts";
 import { fetchOfficialPricing, type OfficialModelMeta, OPENROUTER_MODELS_URL } from "./official-pricing.ts";
 import type { PreflightAdapter } from "./preflight-manager.ts";
 import { refreshProviderRegistrations } from "./provider-registration.ts";
 import { scheduleModelCatalogRefresh } from "./runtime.ts";
-import type { ProviderKitDependencies } from "./runtime-config.ts";
-import { resolveProviderKitDependencies } from "./runtime-config.ts";
+import type { PiProviderDependencies } from "./runtime-config.ts";
+import { resolvePiProviderDependencies } from "./runtime-config.ts";
 import type { ProviderAdapter, ProviderModelDraft, StatusAdapter, TunerAdapter } from "./types.ts";
 
 function compareAdapterIds(left: { id: string }, right: { id: string }): number {
@@ -34,43 +34,43 @@ function adapterKindLabel(kind: AdapterRegistrationEnvelope["kind"]): string {
 }
 
 function warnAdapterIssue(message: string): void {
-	console.warn(`[provider-kit] ${message}`);
+	console.warn(`[pi-provider] ${message}`);
 }
 
 /**
- * Create the single Provider Kit Host used by the published Pi entrypoint.
+ * Create the single Pi Provider Host used by the published Pi entrypoint.
  *
  * The Host deliberately does not assemble adapters during extension factory
  * loading. Adapter factories can run before or after this factory, so the
  * event-bus envelopes are collected and assembled at the first session-level
  * operation after Pi's session_start registration barrier.
  */
-export function createProviderKitHost(dependencies: Partial<ProviderKitDependencies> = {}): (pi: ExtensionAPI) => void {
-	const runtime = resolveProviderKitDependencies(dependencies);
+export function createPiProviderHost(dependencies: Partial<PiProviderDependencies> = {}): (pi: ExtensionAPI) => void {
+	const runtime = resolvePiProviderDependencies(dependencies);
 	return (pi) => {
 		const hostToken = {};
 		const hostClaim = { token: hostToken, occupied: false };
-		const unsubscribeHostClaim = pi.events.on(PROVIDER_KIT_HOST_CLAIM_EVENT, (value) => {
+		const unsubscribeHostClaim = pi.events.on(PI_PROVIDER_HOST_CLAIM_EVENT, (value) => {
 			if (!isHostClaimRequest(value) || value.token === hostToken) return;
 			value.occupied = true;
 		});
-		pi.events.emit(PROVIDER_KIT_HOST_CLAIM_EVENT, hostClaim);
+		pi.events.emit(PI_PROVIDER_HOST_CLAIM_EVENT, hostClaim);
 		if (hostClaim.occupied) {
 			unsubscribeHostClaim();
-			warnAdapterIssue("ignored a second Provider Kit Host; only one Host is supported per Pi runtime");
+			warnAdapterIssue("ignored a second Pi Provider Host; only one Host is supported per Pi runtime");
 			return;
 		}
 
 		const registrations = new Map<object, AdapterRegistrationEnvelope>();
-		let active: ProviderKitRuntimeController | undefined;
-		let readyPromise: Promise<ProviderKitRuntimeController | undefined> | undefined;
+		let active: PiProviderRuntimeController | undefined;
+		let readyPromise: Promise<PiProviderRuntimeController | undefined> | undefined;
 		let disposed = false;
 		let lifecycleGeneration = 0;
 		let latestBackgroundPricing: Record<string, OfficialModelMeta> | undefined;
 		let installedDefinition:
 			| {
 					generation: number;
-					definition: ProviderKitDefinition;
+					definition: PiProviderDefinition;
 					providerDrafts: Map<ProviderAdapter, ProviderModelDraft[]>;
 			  }
 			| undefined;
@@ -97,7 +97,7 @@ export function createProviderKitHost(dependencies: Partial<ProviderKitDependenc
 			readyPromise = undefined;
 		};
 
-		const unsubscribeBridge = pi.events.on(PROVIDER_KIT_STARTUP_BRIDGE_EVENT, (value) => {
+		const unsubscribeBridge = pi.events.on(PI_PROVIDER_STARTUP_BRIDGE_EVENT, (value) => {
 			if (value === null || typeof value !== "object") return;
 			const request = value as StartupBridgeRequest;
 			request.bridge ??= bridge;
@@ -136,7 +136,7 @@ export function createProviderKitHost(dependencies: Partial<ProviderKitDependenc
 			if (previous === undefined) invalidateRuntime();
 		};
 
-		const unsubscribeRegistrations = pi.events.on(PROVIDER_KIT_ADAPTER_EVENT, receiveRegistration);
+		const unsubscribeRegistrations = pi.events.on(PI_PROVIDER_ADAPTER_EVENT, receiveRegistration);
 
 		const groupedWithoutConflicts = <T>(items: T[], key: (item: T) => string, label: string): T[] => {
 			const groups = new Map<string, T[]>();
@@ -173,7 +173,7 @@ export function createProviderKitHost(dependencies: Partial<ProviderKitDependenc
 		const buildDefinition = async (
 			ctx?: ExtensionContext,
 		): Promise<{
-			definition: ProviderKitDefinition;
+			definition: PiProviderDefinition;
 			providerDrafts: Map<ProviderAdapter, ProviderModelDraft[]>;
 			pricing: Record<string, OfficialModelMeta>;
 		}> => {
@@ -358,15 +358,15 @@ export function createProviderKitHost(dependencies: Partial<ProviderKitDependenc
 				preflights: preflightBindings,
 				tuners: tuners.sort(compareAdapterIds),
 			};
-			validateProviderKitDefinition(definition);
+			validatePiProviderDefinition(definition);
 			return { definition, providerDrafts, pricing };
 		};
 
-		const ensureReady = (ctx?: ExtensionContext): Promise<ProviderKitRuntimeController | undefined> => {
+		const ensureReady = (ctx?: ExtensionContext): Promise<PiProviderRuntimeController | undefined> => {
 			if (active) return Promise.resolve(active);
 			if (readyPromise) return readyPromise;
 			const generation = lifecycleGeneration;
-			const pending = (async (): Promise<ProviderKitRuntimeController | undefined> => {
+			const pending = (async (): Promise<PiProviderRuntimeController | undefined> => {
 				if (disposed || generation !== lifecycleGeneration) return undefined;
 				const { definition, providerDrafts, pricing } = await buildDefinition(ctx);
 				if (disposed || generation !== lifecycleGeneration) return undefined;
@@ -382,7 +382,7 @@ export function createProviderKitHost(dependencies: Partial<ProviderKitDependenc
 					for (const providerId of providerIds) pi.unregisterProvider(providerId);
 				}
 				if (disposed || generation !== lifecycleGeneration) return undefined;
-				const controller = installProviderKitRuntime(pi, runtime, definition, pricing, {
+				const controller = installPiProviderRuntime(pi, runtime, definition, pricing, {
 					registerHandlers: false,
 					providerDrafts,
 				});
@@ -442,7 +442,7 @@ export function createProviderKitHost(dependencies: Partial<ProviderKitDependenc
 }
 
 function fetchOfficialPricingForHost(
-	runtime: ProviderKitDependencies,
+	runtime: PiProviderDependencies,
 	onBackgroundRefresh?: (snapshot: Record<string, OfficialModelMeta>) => void,
 ) {
 	return fetchOfficialPricing(

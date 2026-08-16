@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { withDeadline } from "./deadline.ts";
 import type { ModelQualityScore, ProviderCost, ProviderModel, ProviderModelDraft } from "./types.ts";
 
@@ -69,10 +69,7 @@ const pricingRequests = new Map<string, Promise<Record<string, OfficialModelMeta
 
 /** Default cache for OpenRouter metadata, not Pi's native model catalog. */
 export function getDefaultOpenRouterMetadataCachePath(): string {
-	const configuredAgentDir = process.env.PI_CODING_AGENT_DIR;
-	const agentDir =
-		configuredAgentDir && configuredAgentDir.trim() !== "" ? configuredAgentDir : join(homedir(), ".pi", "agent");
-	return join(agentDir, "provider-kit", "openrouter-model-metadata.json");
+	return join(getAgentDir(), "pi-provider", "openrouter-model-metadata.json");
 }
 
 function cloneCost(cost: ProviderCost): ProviderCost {

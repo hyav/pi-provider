@@ -4,16 +4,17 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { discoverAndLoadExtensions, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import * as adapterProtocol from "../core/adapter-protocol.ts";
 import {
-	PROVIDER_KIT_ADAPTER_EVENT,
-	PROVIDER_KIT_ADAPTER_PROTOCOL_VERSION,
-	PROVIDER_KIT_STARTUP_BRIDGE_EVENT,
+	PI_PROVIDER_ADAPTER_EVENT,
+	PI_PROVIDER_ADAPTER_PROTOCOL_VERSION,
+	PI_PROVIDER_STARTUP_BRIDGE_EVENT,
 } from "../core/adapter-protocol.ts";
-import { createProviderKitHost } from "../core/host.ts";
+import { createPiProviderHost } from "../core/host.ts";
 import { clearPricingCache, OPENROUTER_MODELS_URL } from "../core/official-pricing.ts";
 import type { PreflightAdapter } from "../core/preflight-manager.ts";
 import type { ProviderAdapter, StatusAdapter, TunerAdapter } from "../core/types.ts";
-import providerKitExtension, {
+import piProviderExtension, {
 	definePreflightExtension,
 	defineProviderExtension,
 	defineStatusExtension,
@@ -32,6 +33,14 @@ interface TestContext {
 }
 
 type Handler = (event: any, context: any) => unknown;
+
+test("uses the Pi Provider event namespace", () => {
+	const protocol = adapterProtocol as unknown as Record<string, unknown>;
+	assert.equal(protocol.PI_PROVIDER_ADAPTER_EVENT, "pi-provider:adapter");
+	assert.equal(protocol.PI_PROVIDER_STARTUP_BRIDGE_EVENT, "pi-provider:startup-bridge");
+	assert.equal(protocol.PI_PROVIDER_HOST_CLAIM_EVENT, "pi-provider:host-claim");
+	assert.equal(protocol.PI_PROVIDER_ADAPTER_PROTOCOL_VERSION, 2);
+});
 
 class TestPi {
 	readonly events = new (class {
@@ -192,8 +201,8 @@ async function writeFixturePackageEntrypoint(root: string): Promise<string> {
 	await writeFile(
 		entrypoint,
 		`
-import { createProviderKitExtension } from ${JSON.stringify(join(import.meta.dirname, "../index.ts"))};
-export default createProviderKitExtension({
+import { createPiProviderExtension } from ${JSON.stringify(join(import.meta.dirname, "../index.ts"))};
+export default createPiProviderExtension({
   adapterRoot: ${JSON.stringify(root)},
   dependencies: { enableOfficialPricingFallback: false },
 });
@@ -205,7 +214,7 @@ export default createProviderKitExtension({
 test("the package entrypoint loads every built-in adapter", async () => {
 	const pi = new TestPi();
 	const registrations: Array<{ kind: string; id: string }> = [];
-	pi.events.on(PROVIDER_KIT_ADAPTER_EVENT, (value) => {
+	pi.events.on(PI_PROVIDER_ADAPTER_EVENT, (value) => {
 		if (value && typeof value === "object" && "kind" in value && "id" in value) {
 			registrations.push({
 				kind: String(value.kind),
@@ -214,7 +223,7 @@ test("the package entrypoint loads every built-in adapter", async () => {
 		}
 	});
 
-	await providerKitExtension(pi as unknown as ExtensionAPI);
+	await piProviderExtension(pi as unknown as ExtensionAPI);
 
 	assert.deepEqual(
 		registrations.sort((left, right) => `${left.kind}:${left.id}`.localeCompare(`${right.kind}:${right.id}`)),
@@ -318,8 +327,8 @@ export default defineProviderExtension({
 		assert.equal(result.extensions.length, 1);
 		assert.ok(result.runtime.pendingProviderRegistrations.some(({ name }) => name === "valid-after-invalid"));
 		assert.deepEqual(warnings, [
-			'[provider-kit] failed to load adapter extension "providers/invalid.ts": default export must be a Pi extension factory',
-			'[provider-kit] failed to load adapter extension "providers/throwing.ts": factory failed',
+			'[pi-provider] failed to load adapter extension "providers/invalid.ts": default export must be a Pi extension factory',
+			'[pi-provider] failed to load adapter extension "providers/throwing.ts": factory failed',
 		]);
 	} finally {
 		console.warn = originalWarn;
@@ -329,7 +338,7 @@ export default defineProviderExtension({
 
 async function loadDynamicSet(hostFirst: boolean): Promise<{ pi: TestPi; context: TestContext }> {
 	const pi = new TestPi();
-	const host = createProviderKitHost({
+	const host = createPiProviderHost({
 		enableOfficialPricingFallback: false,
 		modelDiscoveryTimeoutMs: 37,
 		statusRequestTimeoutMs: 41,
@@ -347,7 +356,7 @@ async function loadDynamicSet(hostFirst: boolean): Promise<{ pi: TestPi; context
 }
 
 test("Pi isolates a missing default export and a throwing factory from a valid extension", async () => {
-	const root = await mkdtemp(join(tmpdir(), "pi-provider-kit-extension-test-"));
+	const root = await mkdtemp(join(tmpdir(), "pi-provider-extension-test-"));
 	try {
 		const validPath = join(root, "valid.ts");
 		const missingDefaultPath = join(root, "missing-default.ts");
@@ -374,7 +383,7 @@ test("each public helper creates one registration envelope and provider register
 	const pi = new TestPi();
 	const envelopes: any[] = [];
 	const timeline: string[] = [];
-	pi.events.on(PROVIDER_KIT_ADAPTER_EVENT, (value) => {
+	pi.events.on(PI_PROVIDER_ADAPTER_EVENT, (value) => {
 		timeline.push("envelope");
 		envelopes.push(value);
 	});
@@ -420,7 +429,7 @@ test("each public helper creates one registration envelope and provider register
 	assert.equal(timeline[0], "provider");
 	assert.equal(timeline[1], "envelope");
 	for (const envelope of envelopes) {
-		assert.equal(envelope.version, PROVIDER_KIT_ADAPTER_PROTOCOL_VERSION);
+		assert.equal(envelope.version, PI_PROVIDER_ADAPTER_PROTOCOL_VERSION);
 		assert.equal(typeof envelope.token, "object");
 		assert.equal(typeof envelope.factory, "function");
 		assert.equal(typeof envelope.startupDependencies, "object");
@@ -435,7 +444,7 @@ test("helpers isolate invalid static identity, returned identity, timing, shape,
 
 	const pi = new TestPi();
 	const envelopes: unknown[] = [];
-	pi.events.on(PROVIDER_KIT_ADAPTER_EVENT, (value) => envelopes.push(value));
+	pi.events.on(PI_PROVIDER_ADAPTER_EVENT, (value) => envelopes.push(value));
 	const invalidFactories = [
 		defineProviderExtension({
 			id: "returned-provider",
@@ -531,7 +540,7 @@ test("Host materializes independent adapter factories concurrently", async () =>
 	for (const factory of factories) await factory(pi as unknown as ExtensionAPI);
 
 	hostReady = true;
-	createProviderKitHost({ enableOfficialPricingFallback: false })(pi as unknown as ExtensionAPI);
+	createPiProviderHost({ enableOfficialPricingFallback: false })(pi as unknown as ExtensionAPI);
 	const context = createContext(pi, "parallel-factory-provider");
 	await pi.emit("session_start", { type: "session_start", reason: "startup" }, context);
 	await pi.commands.get("status").handler("", context);
@@ -541,7 +550,7 @@ test("Host materializes independent adapter factories concurrently", async () =>
 
 test("Host schedules one non-blocking model catalog refresh for startup and reload", async () => {
 	const pi = new TestPi();
-	createProviderKitHost({ enableOfficialPricingFallback: false })(pi as unknown as ExtensionAPI);
+	createPiProviderHost({ enableOfficialPricingFallback: false })(pi as unknown as ExtensionAPI);
 	const context = createContext(pi, "unused-provider");
 
 	await pi.emit("session_start", { type: "session_start", reason: "startup" }, context);
@@ -559,9 +568,9 @@ test("Host schedules one non-blocking model catalog refresh for startup and relo
 
 test("Host isolates malformed envelopes and excludes every duplicate ID or binding", async () => {
 	const pi = new TestPi();
-	const host = createProviderKitHost({ enableOfficialPricingFallback: false });
+	const host = createPiProviderHost({ enableOfficialPricingFallback: false });
 	host(pi as unknown as ExtensionAPI);
-	pi.events.emit(PROVIDER_KIT_ADAPTER_EVENT, { version: 1, kind: "tuner", id: "broken", token: {}, adapter: null });
+	pi.events.emit(PI_PROVIDER_ADAPTER_EVENT, { version: 1, kind: "tuner", id: "broken", token: {}, adapter: null });
 
 	const factories = [
 		defineProviderExtension({ id: "conflict-provider", create: () => providerAdapter("conflict-provider", "one") }),
@@ -651,7 +660,7 @@ test("Host isolates malformed envelopes and excludes every duplicate ID or bindi
 
 test("Host reapplies official pricing when it re-registers an accepted Provider", async () => {
 	const pi = new TestPi();
-	const host = createProviderKitHost({
+	const host = createPiProviderHost({
 		enableOfficialPricingFallback: true,
 		officialPricingUrl: "https://pricing.invalid/models",
 		fetch: async () =>
@@ -691,7 +700,7 @@ test("Host reapplies official pricing when it re-registers an accepted Provider"
 });
 
 test("Host reapplies OpenRouter metadata after a non-blocking refresh", async () => {
-	const root = await mkdtemp(join(tmpdir(), "pi-provider-kit-host-pricing-"));
+	const root = await mkdtemp(join(tmpdir(), "pi-provider-host-pricing-"));
 	clearPricingCache(OPENROUTER_MODELS_URL);
 	let release: (() => void) | undefined;
 	let signalStarted: (() => void) | undefined;
@@ -718,7 +727,7 @@ test("Host reapplies OpenRouter metadata after a non-blocking refresh", async ()
 	}) as typeof globalThis.fetch;
 	try {
 		const pi = new TestPi();
-		createProviderKitHost({
+		createPiProviderHost({
 			fetch: fetchFn,
 			officialPricingCacheTtlMs: 0,
 			openRouterMetadataCachePath: join(root, "metadata.json"),
@@ -760,7 +769,7 @@ test("Host reapplies OpenRouter metadata after a non-blocking refresh", async ()
 });
 
 test("Host preserves a dynamically refreshed catalog when background pricing arrives", async () => {
-	const root = await mkdtemp(join(tmpdir(), "pi-provider-kit-host-dynamic-pricing-"));
+	const root = await mkdtemp(join(tmpdir(), "pi-provider-host-dynamic-pricing-"));
 	clearPricingCache(OPENROUTER_MODELS_URL);
 	let release: (() => void) | undefined;
 	let signalStarted: (() => void) | undefined;
@@ -787,7 +796,7 @@ test("Host preserves a dynamically refreshed catalog when background pricing arr
 	}) as typeof globalThis.fetch;
 	try {
 		const pi = new TestPi();
-		createProviderKitHost({
+		createPiProviderHost({
 			fetch: fetchFn,
 			officialPricingCacheTtlMs: 0,
 			openRouterMetadataCachePath: join(root, "metadata.json"),
@@ -847,7 +856,7 @@ test("Host preserves a dynamically refreshed catalog when background pricing arr
 test("Host can bind a Status Adapter to a native Pi provider", async () => {
 	const pi = new TestPi();
 	pi.nativeProviders.set("native-provider", { getModels: () => [{ id: "test-model" }] });
-	const host = createProviderKitHost({ enableOfficialPricingFallback: false });
+	const host = createPiProviderHost({ enableOfficialPricingFallback: false });
 	host(pi as unknown as ExtensionAPI);
 	const statusFactory = defineStatusExtension({
 		id: "native-status",
@@ -865,7 +874,7 @@ test("Host can bind a Status Adapter to a native Pi provider", async () => {
 
 test("tuner ordering is deterministic for equal priorities", async () => {
 	const pi = new TestPi();
-	const host = createProviderKitHost({ enableOfficialPricingFallback: false });
+	const host = createPiProviderHost({ enableOfficialPricingFallback: false });
 	host(pi as unknown as ExtensionAPI);
 	for (const factory of [
 		defineProviderExtension({ id: "ordering-provider", create: () => providerAdapter("ordering-provider") }),
@@ -898,7 +907,7 @@ test("Host shutdown removes listeners and a reloaded Host starts with fresh mana
 	});
 
 	const firstPi = new TestPi();
-	const firstHost = createProviderKitHost({ enableOfficialPricingFallback: false });
+	const firstHost = createPiProviderHost({ enableOfficialPricingFallback: false });
 	firstHost(firstPi as unknown as ExtensionAPI);
 	const firstFactories = makeFactories(true);
 	await firstFactories.provider(firstPi as unknown as ExtensionAPI);
@@ -910,7 +919,7 @@ test("Host shutdown removes listeners and a reloaded Host starts with fresh mana
 	await firstPi.emit("session_shutdown", { type: "session_shutdown", reason: "reload" }, firstContext);
 
 	const secondPi = new TestPi();
-	const secondHost = createProviderKitHost({ enableOfficialPricingFallback: false });
+	const secondHost = createPiProviderHost({ enableOfficialPricingFallback: false });
 	secondHost(secondPi as unknown as ExtensionAPI);
 	const secondFactories = makeFactories(false);
 	await secondFactories.provider(secondPi as unknown as ExtensionAPI);
@@ -923,7 +932,7 @@ test("Host shutdown removes listeners and a reloaded Host starts with fresh mana
 	assert.match(secondNotifications.at(-1) ?? "", /Status: not supported/);
 
 	const thirdPi = new TestPi();
-	const thirdHost = createProviderKitHost({ enableOfficialPricingFallback: false });
+	const thirdHost = createPiProviderHost({ enableOfficialPricingFallback: false });
 	thirdHost(thirdPi as unknown as ExtensionAPI);
 	const thirdFactories = makeFactories(true);
 	await thirdFactories.provider(thirdPi as unknown as ExtensionAPI);
@@ -936,7 +945,7 @@ test("Host shutdown removes listeners and a reloaded Host starts with fresh mana
 
 test("Host startup bridge supplies shared dependencies when Host loads first", async () => {
 	const pi = new TestPi();
-	const host = createProviderKitHost({
+	const host = createPiProviderHost({
 		enableOfficialPricingFallback: false,
 		modelDiscoveryTimeoutMs: 73,
 		statusRequestTimeoutMs: 79,
@@ -953,7 +962,7 @@ test("Host startup bridge supplies shared dependencies when Host loads first", a
 	await factory(pi as unknown as ExtensionAPI);
 	assert.deepEqual(received, { modelDiscoveryTimeoutMs: 73, statusRequestTimeoutMs: 79 });
 	assert.equal(pi.handlers.has("session_start"), true);
-	assert.equal(typeof PROVIDER_KIT_STARTUP_BRIDGE_EVENT, "string");
+	assert.equal(typeof PI_PROVIDER_STARTUP_BRIDGE_EVENT, "string");
 });
 
 test("Host rehydrates an adapter with Host dependencies when the adapter loads first", async () => {
@@ -968,7 +977,7 @@ test("Host rehydrates an adapter with Host dependencies when the adapter loads f
 	});
 	await factory(pi as unknown as ExtensionAPI);
 
-	const host = createProviderKitHost({
+	const host = createPiProviderHost({
 		enableOfficialPricingFallback: false,
 		modelDiscoveryTimeoutMs: 73,
 	});
@@ -1011,7 +1020,7 @@ test("Host rehydrates every adapter capability with Host dependencies", async ()
 		},
 	})(pi as unknown as ExtensionAPI);
 
-	createProviderKitHost({
+	createPiProviderHost({
 		enableOfficialPricingFallback: false,
 		statusRequestTimeoutMs: 79,
 	})(pi as unknown as ExtensionAPI);
@@ -1024,10 +1033,10 @@ test("Host rehydrates every adapter capability with Host dependencies", async ()
 	assert.deepEqual(received.tuner, [8_000, 79]);
 });
 
-test("only the first Provider Kit Host installs runtime handlers", async () => {
+test("only the first Pi Provider Host installs runtime handlers", async () => {
 	const pi = new TestPi();
-	createProviderKitHost({ enableOfficialPricingFallback: false })(pi as unknown as ExtensionAPI);
-	createProviderKitHost({ enableOfficialPricingFallback: false })(pi as unknown as ExtensionAPI);
+	createPiProviderHost({ enableOfficialPricingFallback: false })(pi as unknown as ExtensionAPI);
+	createPiProviderHost({ enableOfficialPricingFallback: false })(pi as unknown as ExtensionAPI);
 
 	assert.equal(pi.handlers.get("before_provider_request")?.length, 1);
 	assert.equal(pi.handlers.get("model_select")?.length, 1);
@@ -1036,7 +1045,7 @@ test("only the first Provider Kit Host installs runtime handlers", async () => {
 
 test("Host does not install a registry after session shutdown cancels readiness", async () => {
 	const pi = new TestPi();
-	createProviderKitHost({
+	createPiProviderHost({
 		officialPricingUrl: "https://shutdown-race.invalid/models",
 		officialPricingTimeoutMs: 20,
 		fetch: async () => await new Promise<Response>(() => {}),

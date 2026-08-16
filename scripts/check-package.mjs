@@ -54,7 +54,7 @@ function run() {
 	for (const file of requiredFiles) {
 		if (!artifactFiles.includes(file)) throw new Error(`npm artifact is missing ${file}`);
 	}
-	const forbiddenPrefixes = ["test/", "scripts/", "pi-provider-kit/", "docs/", "node_modules/"];
+	const forbiddenPrefixes = ["test/", "scripts/", "pi-provider/", "docs/", "node_modules/"];
 	for (const file of artifactFiles) {
 		if (forbiddenPrefixes.some((prefix) => file.startsWith(prefix))) {
 			throw new Error(`npm artifact contains private or repository-only path ${file}`);

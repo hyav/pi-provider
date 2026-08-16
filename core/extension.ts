@@ -1,5 +1,5 @@
-export type { ProviderKitDefinition } from "./definition.ts";
-export { validateProviderKitDefinition } from "./definition.ts";
+export type { PiProviderDefinition } from "./definition.ts";
+export { validatePiProviderDefinition } from "./definition.ts";
 export {
 	normalizeProviderModel,
 	normalizeProviderModels,
@@ -7,14 +7,14 @@ export {
 	registerProviderAdapter,
 } from "./provider-registration.ts";
 export {
-	createProviderKitRuntime,
-	installProviderKitRuntime,
-	type ProviderKitRuntimeController,
+	createPiProviderRuntime,
+	installPiProviderRuntime,
+	type PiProviderRuntimeController,
 } from "./runtime.ts";
-export type { ProviderKitDependencies, ProviderKitLoader } from "./runtime-config.ts";
+export type { PiProviderDependencies, PiProviderLoader } from "./runtime-config.ts";
 export {
-	getDefaultProviderKitDependencies,
-	resolveProviderKitDependencies,
-	validateProviderKitDependencies,
+	getDefaultPiProviderDependencies,
+	resolvePiProviderDependencies,
+	validatePiProviderDependencies,
 } from "./runtime-config.ts";
 export { getStatusModeCompletions } from "./status-report.ts";

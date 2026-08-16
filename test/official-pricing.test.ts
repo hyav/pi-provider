@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import {
@@ -9,11 +9,26 @@ import {
 	fetchOfficialPricing,
 	findOfficialCost,
 	findOfficialMeta,
+	getDefaultOpenRouterMetadataCachePath,
 	getPricingCache,
 	parseOpenRouterModels,
 	parseOpenRouterPricing,
 } from "../core/official-pricing.ts";
 import type { ProviderModelDraft } from "../core/types.ts";
+
+test("stores provider metadata under Pi's resolved agent directory", () => {
+	const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+	process.env.PI_CODING_AGENT_DIR = "~/configured-pi-agent";
+	try {
+		assert.equal(
+			getDefaultOpenRouterMetadataCachePath(),
+			join(homedir(), "configured-pi-agent", "pi-provider", "openrouter-model-metadata.json"),
+		);
+	} finally {
+		if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+		else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+	}
+});
 
 test("parseOpenRouterPricing correctly maps prompt/completion prices and tiers overrides", () => {
 	const samplePayload = {
@@ -491,7 +506,7 @@ test("fetchOfficialPricing caches successful responses and falls back to last ca
 });
 
 test("persists OpenRouter metadata and restores the snapshot across process cache resets", async () => {
-	const root = await mkdtemp(join(tmpdir(), "pi-provider-kit-pricing-cache-"));
+	const root = await mkdtemp(join(tmpdir(), "pi-provider-pricing-cache-"));
 	const cachePath = join(root, "openrouter-model-metadata.json");
 	const pricingUrl = "https://persistent.example/models";
 	const now = 1_700_000_000_000;
@@ -556,7 +571,7 @@ test("persists OpenRouter metadata and restores the snapshot across process cach
 });
 
 test("background pricing refresh returns the current snapshot before network completion", async () => {
-	const root = await mkdtemp(join(tmpdir(), "pi-provider-kit-pricing-background-"));
+	const root = await mkdtemp(join(tmpdir(), "pi-provider-pricing-background-"));
 	const cachePath = join(root, "openrouter-model-metadata.json");
 	const pricingUrl = "https://background.example/models";
 	const now = 1_700_000_000_000;
