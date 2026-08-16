@@ -8,7 +8,7 @@
 
 用户与开发者可以通过以下方式扩展 Pi Provider 能力，无需修改 Pi Provider 的 `index.ts`：
 
-1. 在 capability 目录中添加或删除 TypeScript 文件——可以在 Host 包内（内置 Adapter），也可以在 Pi 解析出的 agent 目录 `<agent-dir>/pi-provider/` 下（用户 Adapter）；
+1. 在 capability 目录中添加或删除 TypeScript 文件——可以在 Host 包内（内置 Adapter），也可以在 Pi 解析出的 agent 目录 `<agent-dir>/extensions/pi-provider/` 下（用户 Adapter）；
 2. 安装另一个本地、npm 或 Git Pi 扩展包；
 3. 执行 `/reload`。
 
@@ -30,7 +30,7 @@ package-root/
 Host 还会在 Pi 解析出的 agent 目录下发现用户 Adapter，无需改动任何包：
 
 ```text
-<agent-dir>/pi-provider/
+<agent-dir>/extensions/pi-provider/
   providers/*.ts           # 用户 Provider Adapter Extensions
   status/*.ts              # 用户 Status Adapter Extensions
   preflight/*.ts           # 用户 Preflight Adapter Extensions
@@ -77,7 +77,7 @@ Host capability 目录中的文件与独立包中被通配符匹配的文件都�
 
 ## 文件契约
 
-每个能力文件使用对应的 helper 导出单一适配器。`providers/`、`status/`、`preflight/` 下的内置 Adapter 遵循完全相同的写法，可作为参考模板：复制到 `<agent-dir>/pi-provider/` 后直接修改即可。只有 Charm Hyper 相关文件（以及 `preflight/openai-codex.ts`）额外依赖包内私有辅助文件，因此新增 Adapter 时建议以 `preflight/deepseek.ts`、`status/deepseek.ts` 或 `providers/` 下的简单文件为蓝本。
+每个能力文件使用对应的 helper 导出单一适配器。`providers/`、`status/`、`preflight/` 下的内置 Adapter 遵循完全相同的写法，可作为参考模板：复制到 `<agent-dir>/extensions/pi-provider/` 后直接修改即可。只有 Charm Hyper 相关文件（以及 `preflight/openai-codex.ts`）额外依赖包内私有辅助文件，因此新增 Adapter 时建议以 `preflight/deepseek.ts`、`status/deepseek.ts` 或 `providers/` 下的简单文件为蓝本。
 
 ```ts
 // providers/example.ts
@@ -104,7 +104,7 @@ Helper 会在实例化前校验静态身份描述符，并确认最终 Adapter �
 ## 生命周期
 
 ### 1. Extension Factory 阶段
-Pi 在启动与 `/reload` 时重新执行 Host 根 extension factory。根入口先创建 Host，再按确定性路径顺序先扫描内置 capability 目录、后扫描用户目录（`<agent-dir>/pi-provider/` 或 `adapterRoot` 覆盖），加载每个当前存在的 `.ts` 或 `.js` 文件。所有 Adapter 在每次加载中共享同一模块缓存，因此被多个 Adapter 引用的文件只会执行一次。独立 Adapter 包仍由 Pi 根据自身 manifest 加载。适配器 helper 会：
+Pi 在启动与 `/reload` 时重新执行 Host 根 extension factory。根入口先创建 Host，再按确定性路径顺序先扫描内置 capability 目录、后扫描用户目录（`<agent-dir>/extensions/pi-provider/` 或 `adapterRoot` 覆盖），加载每个当前存在的 `.ts` 或 `.js` 文件。所有 Adapter 在每次加载中共享同一模块缓存，因此被多个 Adapter 引用的文件只会执行一次。独立 Adapter 包仍由 Pi 根据自身 manifest 加载。适配器 helper 会：
 
 1. 校验静态描述符；
 2. 实例化 Adapter；
@@ -126,6 +126,7 @@ Host 的排序规则为：
 上一个 Host 会取消未完成请求、清空缓存与诊断状态并解绑监听器。每个 Pi runtime 只支持一个活动 Host。`/reload` 重新执行根入口、扫描当前 capability 文件并构建全新 Host 实例：
 
 - 新增文件在 reload 后生效；
+- 修改的文件会重新从磁盘读取，因此编辑现有 Adapter 后 reload 即可生效；
 - 删除的文件在 reload 后清理；
 - 之前的 Status、Preflight 和 Live Check 状态不会泄漏到新 runtime。
 

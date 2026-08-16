@@ -60,7 +60,7 @@ async function writeProviderAdapter(dir: string, relativePath: string, id: strin
 test("resolveAdapterRoots scans the package root before the user root", () => {
 	assert.deepEqual(resolveAdapterRoots({ packageRoot: "/pkg", agentDir: "/agent" }), [
 		"/pkg",
-		join("/agent", "pi-provider"),
+		join("/agent", "extensions", "pi-provider"),
 	]);
 	assert.deepEqual(resolveAdapterRoots({ packageRoot: "/pkg" }), ["/pkg"]);
 	assert.deepEqual(resolveAdapterRoots({ packageRoot: "/pkg", agentDir: "/agent", userRoot: "/custom" }), [

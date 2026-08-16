@@ -6,7 +6,7 @@ This document defines the public contract for dynamically discovered Pi Provider
 
 Users and packages can share Pi Provider capabilities without modifying Pi Provider's `index.ts`:
 
-1. Add or remove TypeScript files in a capability directory — either inside the Host package (built-in Adapters) or under Pi's resolved agent directory `<agent-dir>/pi-provider/` (user Adapters);
+1. Add or remove TypeScript files in a capability directory — either inside the Host package (built-in Adapters) or under Pi's resolved agent directory `<agent-dir>/extensions/pi-provider/` (user Adapters);
 2. Install another local, npm, or Git Pi package;
 3. Execute `/reload`.
 
@@ -28,7 +28,7 @@ package-root/
 The Host also discovers user Adapters under Pi's resolved agent directory, without touching any package:
 
 ```text
-<agent-dir>/pi-provider/
+<agent-dir>/extensions/pi-provider/
   providers/*.ts           # user Provider Adapter Extensions
   status/*.ts              # user Status Adapter Extensions
   preflight/*.ts           # user Preflight Adapter Extensions
@@ -73,7 +73,7 @@ Only core host packages provided by Pi should use `peerDependencies` with `"*"`.
 
 ## File Contract
 
-Each capability file contributes exactly one adapter using its designated helper. The built-in Adapters under `providers/`, `status/`, and `preflight/` follow this exact shape and are the reference templates: copy one into `<agent-dir>/pi-provider/` and customize it. Only the Charm Hyper files (and `preflight/openai-codex.ts`) additionally import package-private helper files, so prefer `preflight/deepseek.ts`, `status/deepseek.ts`, or `providers/` peers as the base for new Adapters.
+Each capability file contributes exactly one adapter using its designated helper. The built-in Adapters under `providers/`, `status/`, and `preflight/` follow this exact shape and are the reference templates: copy one into `<agent-dir>/extensions/pi-provider/` and customize it. Only the Charm Hyper files (and `preflight/openai-codex.ts`) additionally import package-private helper files, so prefer `preflight/deepseek.ts`, `status/deepseek.ts`, or `providers/` peers as the base for new Adapters.
 
 ```ts
 // providers/example.ts
@@ -102,7 +102,7 @@ Helpers validate static identity descriptors before instantiation and verify tha
 
 ### Extension Factory Phase
 
-Pi re-executes the Host root extension factory upon startup and `/reload`. The root creates the Host, scans the built-in capability directories and then the user directory (`<agent-dir>/pi-provider/` or the `adapterRoot` override) in deterministic path order, and loads every current `.ts` or `.js` file. All Adapters share one module cache per load, so a file imported by more than one Adapter executes exactly once. Pi continues to load standalone Adapter packages from their own manifests. The Adapter helper:
+Pi re-executes the Host root extension factory upon startup and `/reload`. The root creates the Host, scans the built-in capability directories and then the user directory (`<agent-dir>/extensions/pi-provider/` or the `adapterRoot` override) in deterministic path order, and loads every current `.ts` or `.js` file. All Adapters share one module cache per load, so a file imported by more than one Adapter executes exactly once. Pi continues to load standalone Adapter packages from their own manifests. The Adapter helper:
 
 1. Validates the static descriptor;
 2. Instantiates the Adapter;
@@ -125,6 +125,7 @@ Host ordering follows deterministic rules:
 The previous Host aborts inflight requests, clears caches and diagnostics, and unregisters event listeners. Each Pi runtime supports exactly one active Host. `/reload` re-executes the root entrypoint, scans the current capability files, and constructs a fresh Host:
 
 - Newly added files become active after reload;
+- Modified files are re-read from disk, so edits to existing Adapters take effect after reload;
 - Removed files are cleaned up after reload;
 - Previous Status, Preflight, and Live Check states do not leak into the new runtime.
 

@@ -259,7 +259,7 @@ test("the package entrypoint discovers adapters under Pi's resolved agent direct
 	const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
 	process.env.PI_CODING_AGENT_DIR = agentDir;
 	try {
-		const providersDir = join(agentDir, "pi-provider", "providers");
+		const providersDir = join(agentDir, "extensions", "pi-provider", "providers");
 		await import("node:fs/promises").then((fs) => fs.mkdir(providersDir, { recursive: true }));
 		await writeFile(
 			join(providersDir, "agent-provider.ts"),

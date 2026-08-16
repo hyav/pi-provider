@@ -1,4 +1,4 @@
-# @hyav/pi-provider
+# pi-provider
 
 [简体中文](README.zh-CN.md)
 
@@ -46,23 +46,24 @@ Use `/status refresh` for free endpoint, authentication, catalog, and account ch
 | Name | Required | Default | Effect |
 |---|---:|---|---|
 | `HYPER_API_KEY` | For Charm Hyper API-key auth | None | Supplies the built-in `charm-hyper` provider credential; OAuth users may use `/login` |
-| `PI_CODING_AGENT_DIR` | No | `~/.pi/agent` | Changes Pi's agent directory; public OpenRouter metadata is cached under `<agent-dir>/pi-provider/` |
+| `PI_CODING_AGENT_DIR` | No | `~/.pi/agent` | Changes Pi's agent directory; public OpenRouter metadata is cached under `<agent-dir>/extensions/pi-provider/` |
 
-Programmatic integrations can configure pricing fallback, pricing policies, request timeouts, metadata URLs, and cache paths through `createPiProviderRuntime()` or `createPiProviderHost()`. Host packages with a custom capability root can call `createPiProviderExtension({ adapterRoot, dependencies })`. The source definition [`PiProviderDependencies`](core/runtime-config.ts) is authoritative.
+Programmatic integrations can configure pricing fallback, pricing policies, request timeouts, metadata URLs, and cache paths through `createPiProviderRuntime()` or `createPiProviderHost()`. Programmatic defaults resolve the agent directory from `PI_CODING_AGENT_DIR` (falling back to `~/.pi/agent`) and keep the OpenRouter metadata cache on disk under `<agent-dir>/extensions/pi-provider/`, matching the table above; the Pi entrypoint overrides it with Pi's own resolution. Host packages with a custom capability root can call `createPiProviderExtension({ adapterRoot, dependencies })`. The source definition [`PiProviderDependencies`](core/runtime-config.ts) is authoritative.
 
 ## Adapter discovery (file-level plug and play)
 
 Built-in Adapters ship inside the package and are always discovered. User Adapters live under Pi's resolved agent directory and are discovered too:
 
 ```text
-<agent-dir>/pi-provider/
+<agent-dir>/extensions/pi-provider/
   providers/   # provider Adapter files
   status/      # status Adapter files
   preflight/   # preflight Adapter files
   tuners/      # tuner Adapter files
 ```
 
-Add or remove files there, then run `/reload` to rediscover them without touching the package. User Adapters load after built-ins, so a same-ID file overrides the built-in Adapter (the Host keeps the latest registration and warns). `createPiProviderExtension({ adapterRoot })` replaces the default user directory with a custom root; built-ins are always scanned. The built-in Adapters under the package's `providers/`, `status/`, and `preflight/` are reference templates with this exact shape — copy one and customize it (Charm Hyper and `preflight/openai-codex.ts` also use package-private helpers).
+
+Add, remove, or modify files there, then run `/reload` to rediscover them without touching the package; edits to existing files are re-read from disk. User Adapters load after built-ins, so a same-ID file overrides the built-in Adapter (the Host keeps the latest registration and warns). `createPiProviderExtension({ adapterRoot })` replaces the default user directory with a custom root; built-ins are always scanned. The built-in Adapters under the package's `providers/`, `status/`, and `preflight/` are reference templates with this exact shape — copy one and customize it (Charm Hyper and `preflight/openai-codex.ts` also use package-private helpers).
 
 Adapter files import helpers and types from `@hyav/pi-provider` (aliased inside the loader):
 

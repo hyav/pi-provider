@@ -19,7 +19,7 @@ import type { ProviderModelDraft } from "../core/types.ts";
 test("stores provider metadata under the injected agent directory", () => {
 	assert.equal(
 		getDefaultOpenRouterMetadataCachePath("/users/example/pi-agent"),
-		join("/users/example/pi-agent", "pi-provider", "openrouter-model-metadata.json"),
+		join("/users/example/pi-agent", "extensions", "pi-provider", "openrouter-model-metadata.json"),
 	);
 });
 

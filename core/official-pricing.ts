@@ -68,7 +68,7 @@ const pricingRequests = new Map<string, Promise<Record<string, OfficialModelMeta
 
 /** Default cache for OpenRouter metadata, not Pi's native model catalog. */
 export function getDefaultOpenRouterMetadataCachePath(agentDir: string): string {
-	return join(agentDir, "pi-provider", "openrouter-model-metadata.json");
+	return join(agentDir, "extensions", "pi-provider", "openrouter-model-metadata.json");
 }
 
 function cloneCost(cost: ProviderCost): ProviderCost {

@@ -16,7 +16,7 @@ type AdapterExtensionFactory = (pi: ExtensionAPI) => void | Promise<void>;
 export interface AdapterRootOptions {
 	/** Package root containing built-in adapters; defaults to this package. */
 	packageRoot?: string;
-	/** Pi's resolved agent directory; user adapters are discovered under `<agentDir>/pi-provider`. */
+	/** Pi's resolved agent directory; user adapters are discovered under `<agentDir>/extensions/pi-provider`. */
 	agentDir?: string;
 	/** Explicit user adapter root; replaces the agentDir-based default when provided. */
 	userRoot?: string;
@@ -25,7 +25,7 @@ export interface AdapterRootOptions {
 /** Built-in adapters always load first; user adapters load last so they can override. */
 export function resolveAdapterRoots(options: AdapterRootOptions): string[] {
 	const { packageRoot, agentDir, userRoot } = options;
-	const defaultUserRoot = agentDir !== undefined && agentDir !== "" ? join(agentDir, "pi-provider") : undefined;
+	const defaultUserRoot = agentDir !== undefined && agentDir !== "" ? join(agentDir, "extensions", "pi-provider") : undefined;
 	const resolvedUserRoot = userRoot ?? defaultUserRoot;
 	const roots = [packageRoot ?? defaultPackageRoot];
 	if (resolvedUserRoot !== undefined) roots.push(resolvedUserRoot);
