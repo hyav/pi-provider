@@ -1883,7 +1883,7 @@ test("updates native quality metrics after a non-blocking metadata refresh", asy
 		assert.match(notifications.at(-1) ?? "", /Quality:\n {2}Status: unavailable · no AA\/OpenRouter metric/);
 		release?.();
 		for (let attempt = 0; attempt < 100; attempt++) {
-			await new Promise((resolve) => setImmediate(resolve));
+			await new Promise((resolve) => setTimeout(resolve, 10));
 			await commands.status.handler("", ctx);
 			if ((notifications.at(-1) ?? "").includes("Source: AA/OpenRouter")) break;
 		}

@@ -89,7 +89,11 @@ jobs:
           npm run audit:runtime
           npm run audit:all
           npm run check
-          npm test
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
+            npm test -- --test-concurrency=1
+          else
+            npm test
+          fi
           npm run artifact:check
 
       - name: Pack tarball
