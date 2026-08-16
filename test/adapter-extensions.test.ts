@@ -14,7 +14,8 @@ import { createPiProviderHost } from "../core/host.ts";
 import { clearPricingCache, OPENROUTER_MODELS_URL } from "../core/official-pricing.ts";
 import type { PreflightAdapter } from "../core/preflight-manager.ts";
 import type { ProviderAdapter, StatusAdapter, TunerAdapter } from "../core/types.ts";
-import piProviderExtension, {
+import {
+	createPiProviderExtension,
 	definePreflightExtension,
 	defineProviderExtension,
 	defineStatusExtension,
@@ -213,6 +214,9 @@ export default createPiProviderExtension({
 
 test("the package entrypoint loads every built-in adapter", async () => {
 	const pi = new TestPi();
+	const piProviderExtension = createPiProviderExtension({
+		dependencies: { enableOfficialPricingFallback: false },
+	});
 	const registrations: Array<{ kind: string; id: string }> = [];
 	pi.events.on(PI_PROVIDER_ADAPTER_EVENT, (value) => {
 		if (value && typeof value === "object" && "kind" in value && "id" in value) {
