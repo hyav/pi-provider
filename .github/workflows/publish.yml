@@ -127,7 +127,12 @@ jobs:
 
       - name: Publish package to npm via Trusted Publishing
         if: steps.registry_version.outputs.published != 'true'
-        run: npm publish --access public
+        run: |
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
+            npm publish --access public --ignore-scripts
+          else
+            npm publish --access public
+          fi
 
       - name: Upload release assets
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
