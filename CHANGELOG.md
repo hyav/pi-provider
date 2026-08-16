@@ -2,10 +2,12 @@
 
 This file is the authoritative user-facing release history for `@hyav/pi-provider`.
 
-## Unreleased
+## 0.1.2 - 2026-08-17
 
 - Expose one Pi package entrypoint while preserving file-level Adapter discovery when `/reload` runs.
 - Isolate invalid Adapter modules behind capability-relative diagnostics and declare `jiti` as the runtime loader.
+- Rename the public APIs to Pi Provider equivalents and remove legacy aliases; programmatic consumers must update those imported names.
+- Store generated metadata under `<agent-dir>/pi-provider/`, following Pi's resolved agent directory.
 
 ## 0.1.1 - 2026-08-16
 
