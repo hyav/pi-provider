@@ -4,7 +4,7 @@
 
 A provider extension toolkit for [Pi](https://pi.dev). It registers LLM providers, discovers model catalogs, tunes requests, and reports cached or explicitly refreshed account status while preserving Pi's native footer.
 
-[Adapter contract](docs/adapter-extensions.md) · [Support](SUPPORT.md) · [Contributing](CONTRIBUTING.md) · [Changelog](CHANGELOG.md) · [Security](SECURITY.md)
+[Adapter contract](https://github.com/hyav/pi-provider/blob/main/docs/adapter-extensions.md) · [Support](SUPPORT.md) · [Contributing](CONTRIBUTING.md) · [Changelog](CHANGELOG.md) · [Security](SECURITY.md)
 
 ## Highlights
 
@@ -23,7 +23,6 @@ Requires Node.js 22.19.0 or newer, Pi, and credentials for the providers you use
 pi install npm:@hyav/pi-provider
 ```
 
-The package intentionally ships TypeScript source for Pi to load; it is not a standalone Node CLI.
 
 ## Quick start
 
@@ -51,7 +50,7 @@ Use `/status refresh` for free endpoint, authentication, catalog, and account ch
 
 Programmatic integrations can configure pricing fallback, pricing policies, request timeouts, metadata URLs, and cache paths through `createProviderKitRuntime()` or `createProviderKitHost()`. The source definition [`ProviderKitDependencies`](core/runtime-config.ts) is authoritative.
 
-Trusted packages can add adapters through manifest entries under `providers/`, `status/`, `preflight/`, and `tuners/`. See the [adapter extension contract](docs/adapter-extensions.md) for helpers, validation, conflicts, reload behavior, and lifecycle boundaries. The root [`index.ts`](index.ts) defines the public TypeScript exports.
+Trusted packages can add adapters through manifest entries under `providers/`, `status/`, `preflight/`, and `tuners/`. See the [adapter extension contract](https://github.com/hyav/pi-provider/blob/main/docs/adapter-extensions.md) for helpers, validation, conflicts, reload behavior, and lifecycle boundaries. The root [`index.ts`](index.ts) defines the public TypeScript exports.
 
 ## Before you use it
 

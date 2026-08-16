@@ -4,7 +4,7 @@
 
 为 [Pi](https://pi.dev) 提供 Provider 扩展工具包，用于注册 LLM Provider、发现模型目录、调优请求，以及查看缓存或显式刷新的账户状态，同时保留 Pi 原生 Footer。
 
-[适配器契约](docs/adapter-extensions.md) · [支持策略](SUPPORT.md) · [参与贡献](CONTRIBUTING.md) · [更新记录](CHANGELOG.md) · [安全策略](SECURITY.md)
+[适配器契约](https://github.com/hyav/pi-provider/blob/main/docs/adapter-extensions.zh-CN.md) · [支持策略](SUPPORT.md) · [参与贡献](CONTRIBUTING.md) · [更新记录](CHANGELOG.md) · [安全策略](SECURITY.md)
 
 ## 核心能力
 
@@ -23,7 +23,6 @@
 pi install npm:@hyav/pi-provider
 ```
 
-包有意发布由 Pi 加载的 TypeScript 源码，不是独立的 Node CLI。
 
 ## 快速开始
 
@@ -51,7 +50,7 @@ pi install npm:@hyav/pi-provider
 
 程序化集成可以通过 `createProviderKitRuntime()` 或 `createProviderKitHost()` 配置价格回退、价格策略、请求超时、元数据 URL 和缓存路径。源码定义 [`ProviderKitDependencies`](core/runtime-config.ts) 是权威依据。
 
-可信包可以通过 manifest 中的 `providers/`、`status/`、`preflight/` 和 `tuners/` 条目添加 Adapter。Helper、校验、冲突、reload 行为和生命周期边界见 [Adapter Extension 契约](docs/adapter-extensions.md)。根目录 [`index.ts`](index.ts) 定义公开 TypeScript 导出。
+可信包可以通过 manifest 中的 `providers/`、`status/`、`preflight/` 和 `tuners/` 条目添加 Adapter。Helper、校验、冲突、reload 行为和生命周期边界见 [Adapter Extension 契约](https://github.com/hyav/pi-provider/blob/main/docs/adapter-extensions.zh-CN.md)。根目录 [`index.ts`](index.ts) 定义公开 TypeScript 导出。
 
 ## 使用须知
 
