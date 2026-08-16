@@ -1,0 +1,80 @@
+{
+  "name": "@hyav/pi-provider",
+  "version": "0.1.0",
+  "description": "Provider extension toolkit for Pi to integrate and manage custom LLM providers with dynamic models, request tuners, and account status.",
+  "author": "hyav",
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hyav/pi-provider.git"
+  },
+  "homepage": "https://github.com/hyav/pi-provider#readme",
+  "bugs": {
+    "url": "https://github.com/hyav/pi-provider/issues"
+  },
+  "type": "module",
+  "main": "./index.ts",
+  "exports": {
+    ".": "./index.ts",
+    "./package.json": "./package.json"
+  },
+  "keywords": [
+    "pi-package",
+    "pi",
+    "provider",
+    "provider-kit",
+    "charm-hyper",
+    "llm"
+  ],
+  "scripts": {
+    "test": "tsx --test test/**/*.test.ts",
+    "typecheck": "tsc --noEmit",
+    "check": "biome check . && tsc --noEmit",
+    "audit:runtime": "npm audit --omit=dev --audit-level=high",
+    "audit:all": "npm audit --audit-level=high",
+    "artifact:check": "node scripts/check-package.mjs",
+    "prepublishOnly": "npm run audit:runtime && npm run audit:all && npm run check && npm test && npm run artifact:check"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.3.5",
+    "@earendil-works/pi-coding-agent": "0.84.1",
+    "@earendil-works/pi-tui": "0.84.1",
+    "@types/node": "22.20.1",
+    "tsx": "4.23.11",
+    "typescript": "5.9.3"
+  },
+  "pi": {
+    "extensions": [
+      "./index.ts",
+      "./providers/*.ts",
+      "./status/*.ts",
+      "./preflight/*.ts",
+      "./tuners/*.ts"
+    ]
+  },
+  "files": [
+    "index.ts",
+    "core",
+    "providers",
+    "preflight",
+    "status",
+    "tuners",
+    "README.md",
+    "README.zh-CN.md",
+    "CHANGELOG.md",
+    "CONTRIBUTING.md",
+    "SECURITY.md",
+    "SUPPORT.md",
+    "LICENSE"
+  ]
+}

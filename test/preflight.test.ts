@@ -1,0 +1,263 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { createCharmHyperPreflightAdapter } from "../preflight/charm-hyper.ts";
+import { createDeepSeekPreflightAdapter } from "../preflight/deepseek.ts";
+import { createGooglePreflightAdapter } from "../preflight/google.ts";
+import { createOpenAICodexPreflightAdapter } from "../preflight/openai-codex.ts";
+import { createOpenCodePreflightAdapter } from "../preflight/opencode.ts";
+import { createOpenCodeGoPreflightAdapter } from "../preflight/opencode-go.ts";
+import { HYPER_USER_AGENT } from "../providers/charm-hyper/constants.ts";
+
+test("Charm Hyper preflight checks the current catalog and falls back to the legacy endpoint", async () => {
+	const requests: Array<{ url: string; init?: RequestInit }> = [];
+	const adapter = createCharmHyperPreflightAdapter(1_000);
+
+	const snapshot = await adapter.fetch({
+		fetch: async (input, init) => {
+			requests.push({ url: String(input), init });
+			if (requests.length === 1) return new Response("not found", { status: 404 });
+			return new Response(JSON.stringify({ data: [{ id: "deepseek-v4-pro" }] }), { status: 200 });
+		},
+		getApiKey: async () => "hyper-test-key",
+		now: () => 500,
+		model: { provider: "charm-hyper", id: "deepseek-v4-pro" } as any,
+	});
+
+	assert.deepEqual(snapshot, {
+		passed: true,
+		checks: ["endpoint", "auth", "catalog"],
+		updatedAt: 500,
+		httpStatus: 200,
+	});
+	assert.deepEqual(
+		requests.map(({ url }) => url),
+		["https://hyper.charm.land/v1/provider", "https://hyper.charm.land/v1/models"],
+	);
+	assert.equal(new Headers(requests[0]?.init?.headers).get("authorization"), "Bearer hyper-test-key");
+	assert.equal(new Headers(requests[0]?.init?.headers).get("user-agent"), HYPER_USER_AGENT);
+});
+
+test("DeepSeek preflight checks the authenticated model catalog without generating output", async () => {
+	const requests: Array<{ url: string; init?: RequestInit }> = [];
+	const adapter = createDeepSeekPreflightAdapter(1_000);
+
+	const snapshot = await adapter.fetch({
+		fetch: async (input, init) => {
+			requests.push({ url: String(input), init });
+			return new Response(JSON.stringify({ data: [{ id: "deepseek-v4-pro" }] }), {
+				status: 200,
+				headers: { "content-type": "application/json" },
+			});
+		},
+		getApiKey: async () => "deepseek-test-key",
+		now: () => 1_000,
+		model: { provider: "deepseek", id: "deepseek-v4-pro" } as any,
+	});
+
+	assert.deepEqual(snapshot, {
+		passed: true,
+		checks: ["endpoint", "auth", "catalog"],
+		updatedAt: 1_000,
+		httpStatus: 200,
+	});
+	assert.equal(requests.length, 1);
+	assert.equal(requests[0]?.url, "https://api.deepseek.com/models");
+	assert.deepEqual(requests[0]?.init?.headers, {
+		Accept: "application/json",
+		"Accept-Encoding": "identity",
+		Authorization: "Bearer deepseek-test-key",
+	});
+});
+
+test("Google preflight uses the Gemini API key header and requires a generative catalog model", async () => {
+	const requests: Array<{ url: string; init?: RequestInit }> = [];
+	const adapter = createGooglePreflightAdapter(1_000);
+
+	const snapshot = await adapter.fetch({
+		fetch: async (input, init) => {
+			requests.push({ url: String(input), init });
+			return new Response(
+				JSON.stringify({
+					models: [
+						{
+							name: "models/gemini-3.1-pro-preview",
+							baseModelId: "gemini-3.1-pro-preview",
+							supportedGenerationMethods: ["generateContent"],
+						},
+					],
+				}),
+				{ status: 200, headers: { "content-type": "application/json" } },
+			);
+		},
+		getApiKey: async () => "google-test-key",
+		now: () => 2_000,
+		model: { provider: "google", id: "gemini-3.1-pro-preview" } as any,
+	});
+
+	assert.deepEqual(snapshot, {
+		passed: true,
+		checks: ["endpoint", "auth", "catalog"],
+		updatedAt: 2_000,
+		httpStatus: 200,
+	});
+	assert.equal(requests.length, 1);
+	assert.equal(requests[0]?.url, "https://generativelanguage.googleapis.com/v1beta/models");
+	assert.deepEqual(requests[0]?.init?.headers, {
+		Accept: "application/json",
+		"Accept-Encoding": "identity",
+		"x-goog-api-key": "google-test-key",
+	});
+});
+
+test("Google preflight also matches a versioned model name when its base model ID differs", async () => {
+	const adapter = createGooglePreflightAdapter(1_000);
+	const snapshot = await adapter.fetch({
+		fetch: async () =>
+			new Response(
+				JSON.stringify({
+					models: [
+						{
+							name: "models/gemini-3.1-pro-preview-001",
+							baseModelId: "gemini-3.1-pro-preview",
+							supportedGenerationMethods: ["generateContent"],
+						},
+					],
+				}),
+				{ status: 200 },
+			),
+		getApiKey: async () => "google-test-key",
+		now: () => 2_500,
+		model: { provider: "google", id: "gemini-3.1-pro-preview-001" } as any,
+	});
+
+	assert.equal(snapshot.passed, true);
+});
+
+test("OpenCode Zen preflight checks its public catalog without claiming catalog access proves auth", async () => {
+	const requests: Array<{ url: string; init?: RequestInit }> = [];
+	const adapter = createOpenCodePreflightAdapter(1_000);
+
+	const snapshot = await adapter.fetch({
+		fetch: async (input, init) => {
+			requests.push({ url: String(input), init });
+			return new Response(
+				JSON.stringify({
+					object: "list",
+					data: [{ id: "gpt-5.5", object: "model", owned_by: "opencode" }],
+				}),
+				{ status: 200, headers: { "content-type": "application/json" } },
+			);
+		},
+		getApiKey: async () => "opencode-test-key",
+		now: () => 3_000,
+		model: { provider: "opencode", id: "gpt-5.5" } as any,
+	});
+
+	assert.deepEqual(snapshot, {
+		passed: true,
+		checks: ["endpoint", "catalog"],
+		updatedAt: 3_000,
+		httpStatus: 200,
+	});
+	assert.equal(requests.length, 1);
+	assert.equal(requests[0]?.url, "https://opencode.ai/zen/v1/models");
+	assert.deepEqual(requests[0]?.init?.headers, {
+		Accept: "application/json",
+		"Accept-Encoding": "identity",
+		Authorization: "Bearer opencode-test-key",
+	});
+});
+
+test("OpenCode Go preflight uses the Go catalog endpoint for the native Go provider", async () => {
+	const requests: string[] = [];
+	const adapter = createOpenCodeGoPreflightAdapter(1_000);
+
+	const snapshot = await adapter.fetch({
+		fetch: async (input) => {
+			requests.push(String(input));
+			return new Response(JSON.stringify({ object: "list", data: [{ id: "kimi-k3" }] }), {
+				status: 200,
+				headers: { "content-type": "application/json" },
+			});
+		},
+		getApiKey: async () => "opencode-go-test-key",
+		now: () => 4_000,
+		model: { provider: "opencode-go", id: "kimi-k3" } as any,
+	});
+
+	assert.deepEqual(snapshot, {
+		passed: true,
+		checks: ["endpoint", "catalog"],
+		updatedAt: 4_000,
+		httpStatus: 200,
+	});
+	assert.deepEqual(requests, ["https://opencode.ai/zen/go/v1/models"]);
+});
+
+test("OpenAI Codex preflight sends the OAuth account identity to the per-account model catalog", async () => {
+	const encode = (value: string) => Buffer.from(value).toString("base64url");
+	const token = [
+		encode("header"),
+		encode(JSON.stringify({ "https://api.openai.com/auth": { chatgpt_account_id: "account-123" } })),
+		encode("signature"),
+	].join(".");
+	const requests: Array<{ url: string; init?: RequestInit }> = [];
+	const adapter = createOpenAICodexPreflightAdapter(1_000);
+
+	const snapshot = await adapter.fetch({
+		fetch: async (input, init) => {
+			requests.push({ url: String(input), init });
+			return new Response(
+				JSON.stringify({
+					models: [
+						{
+							slug: "gpt-5.6-sol",
+							visibility: "list",
+							supported_in_api: true,
+						},
+					],
+				}),
+				{ status: 200, headers: { "content-type": "application/json" } },
+			);
+		},
+		getApiKey: async () => token,
+		now: () => 5_000,
+		model: { provider: "openai-codex", id: "gpt-5.6-sol" } as any,
+	});
+
+	assert.deepEqual(snapshot, {
+		passed: true,
+		checks: ["endpoint", "auth", "catalog"],
+		updatedAt: 5_000,
+		httpStatus: 200,
+	});
+	assert.equal(requests.length, 1);
+	assert.equal(requests[0]?.url, "https://chatgpt.com/backend-api/codex/models?client_version=0.144.1");
+	assert.deepEqual(requests[0]?.init?.headers, {
+		Accept: "application/json",
+		"Accept-Encoding": "identity",
+		Authorization: `Bearer ${token}`,
+		"chatgpt-account-id": "account-123",
+		originator: "pi",
+		"User-Agent": "@hyav/pi-provider",
+	});
+});
+
+test("OpenAI Codex preflight rejects a credential without an account identity before network access", async () => {
+	const adapter = createOpenAICodexPreflightAdapter(1_000);
+	let requests = 0;
+
+	await assert.rejects(
+		adapter.fetch({
+			fetch: async () => {
+				requests++;
+				return new Response("unexpected");
+			},
+			getApiKey: async () => "not-a-codex-jwt",
+			now: () => 6_000,
+			model: { provider: "openai-codex", id: "gpt-5.5" } as any,
+		}),
+		(error: any) => error?.name === "ProviderDataError" && error.code === "auth",
+	);
+	assert.equal(requests, 0);
+});
