@@ -1,7 +1,3 @@
-import { defineProviderExtension } from "../core/adapter-extensions.ts";
-import { withDeadline } from "../core/deadline.ts";
-import { isProviderDataError, ProviderDataError } from "../core/errors.ts";
-import { normalizeProviderModels } from "../core/provider-registration.ts";
 import type {
 	ModelCatalogStatus,
 	ProviderAdapter,
@@ -9,7 +5,14 @@ import type {
 	ProviderModelDraft,
 	ProviderRefreshContext,
 	ThinkingLevel,
-} from "../core/types.ts";
+} from "@hyav/pi-provider";
+import {
+	defineProviderExtension,
+	isProviderDataError,
+	normalizeProviderModels,
+	ProviderDataError,
+	withDeadline,
+} from "@hyav/pi-provider";
 import { HYPER_BASE_URL, HYPER_USER_AGENT, hyperJsonHeaders } from "./charm-hyper/constants.ts";
 import { createCharmHyperOAuth } from "./charm-hyper/oauth.ts";
 

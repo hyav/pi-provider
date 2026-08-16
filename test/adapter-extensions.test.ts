@@ -213,38 +213,85 @@ export default createPiProviderExtension({
 }
 
 test("the package entrypoint loads every built-in adapter", async () => {
-	const pi = new TestPi();
-	const piProviderExtension = createPiProviderExtension({
-		dependencies: { enableOfficialPricingFallback: false },
-	});
-	const registrations: Array<{ kind: string; id: string }> = [];
-	pi.events.on(PI_PROVIDER_ADAPTER_EVENT, (value) => {
-		if (value && typeof value === "object" && "kind" in value && "id" in value) {
-			registrations.push({
-				kind: String(value.kind),
-				id: String(value.id),
-			});
-		}
-	});
+	const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+	process.env.PI_CODING_AGENT_DIR = join(tmpdir(), "pi-provider-isolated-agent-");
+	try {
+		const pi = new TestPi();
+		const piProviderExtension = createPiProviderExtension({
+			dependencies: { enableOfficialPricingFallback: false },
+		});
+		const registrations: Array<{ kind: string; id: string }> = [];
+		pi.events.on(PI_PROVIDER_ADAPTER_EVENT, (value) => {
+			if (value && typeof value === "object" && "kind" in value && "id" in value) {
+				registrations.push({
+					kind: String(value.kind),
+					id: String(value.id),
+				});
+			}
+		});
 
-	await piProviderExtension(pi as unknown as ExtensionAPI);
+		await piProviderExtension(pi as unknown as ExtensionAPI);
 
-	assert.deepEqual(
-		registrations.sort((left, right) => `${left.kind}:${left.id}`.localeCompare(`${right.kind}:${right.id}`)),
-		[
-			{ kind: "preflight", id: "charm-hyper-preflight" },
-			{ kind: "preflight", id: "deepseek-preflight" },
-			{ kind: "preflight", id: "google-preflight" },
-			{ kind: "preflight", id: "openai-codex-preflight" },
-			{ kind: "preflight", id: "opencode-go-preflight" },
-			{ kind: "preflight", id: "opencode-preflight" },
-			{ kind: "provider", id: "charm-hyper" },
-			{ kind: "status", id: "charm-hyper-status" },
-			{ kind: "status", id: "deepseek-status" },
-			{ kind: "status", id: "openai-codex-status" },
-			{ kind: "status", id: "opencode-go-status" },
-		],
-	);
+		assert.deepEqual(
+			registrations.sort((left, right) => `${left.kind}:${left.id}`.localeCompare(`${right.kind}:${right.id}`)),
+			[
+				{ kind: "preflight", id: "charm-hyper-preflight" },
+				{ kind: "preflight", id: "deepseek-preflight" },
+				{ kind: "preflight", id: "google-preflight" },
+				{ kind: "preflight", id: "openai-codex-preflight" },
+				{ kind: "preflight", id: "opencode-go-preflight" },
+				{ kind: "preflight", id: "opencode-preflight" },
+				{ kind: "provider", id: "charm-hyper" },
+				{ kind: "status", id: "charm-hyper-status" },
+				{ kind: "status", id: "deepseek-status" },
+				{ kind: "status", id: "openai-codex-status" },
+				{ kind: "status", id: "opencode-go-status" },
+			],
+		);
+	} finally {
+		if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+		else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+	}
+});
+
+test("the package entrypoint discovers adapters under Pi's resolved agent directory", async () => {
+	const agentDir = await mkdtemp(join(tmpdir(), "pi-provider-agent-dir-"));
+	const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+	process.env.PI_CODING_AGENT_DIR = agentDir;
+	try {
+		const providersDir = join(agentDir, "pi-provider", "providers");
+		await import("node:fs/promises").then((fs) => fs.mkdir(providersDir, { recursive: true }));
+		await writeFile(
+			join(providersDir, "agent-provider.ts"),
+			`
+import { defineProviderExtension } from "@hyav/pi-provider";
+export default defineProviderExtension({
+  id: "agent-provider",
+  create: () => ({
+    id: "agent-provider",
+    provider: {
+      name: "Agent Provider",
+      baseUrl: "https://provider.invalid/v1",
+      apiKey: "$AGENT_PROVIDER_KEY",
+      api: "openai-completions",
+      models: [{ id: "agent-model" }],
+    },
+  }),
+});
+`,
+		);
+
+		const pi = new TestPi();
+		const piProviderExtension = createPiProviderExtension({
+			dependencies: { enableOfficialPricingFallback: false },
+		});
+		await piProviderExtension(pi as unknown as ExtensionAPI);
+		assert.ok(pi.providers.has("agent-provider"));
+	} finally {
+		if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+		else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+		await rm(agentDir, { recursive: true, force: true });
+	}
 });
 
 test("reloading the package entrypoint discovers added and removed adapter files", async () => {
@@ -261,12 +308,12 @@ test("reloading the package entrypoint discovers added and removed adapter files
 			return result.runtime.pendingProviderRegistrations.map(({ name }) => name);
 		};
 
-		assert.deepEqual(await loadProviderIds(), []);
+		assert.deepEqual(await loadProviderIds(), ["charm-hyper"]);
 		const providerPath = join(providersDir, "reload-provider.ts");
 		await writeFile(
 			providerPath,
 			`
-import { defineProviderExtension } from "${join(import.meta.dirname, "../index.ts")}";
+import { defineProviderExtension } from "@hyav/pi-provider";
 export default defineProviderExtension({
   id: "reload-provider",
   create: () => ({
@@ -283,9 +330,9 @@ export default defineProviderExtension({
 `,
 		);
 
-		assert.deepEqual(await loadProviderIds(), ["reload-provider"]);
+		assert.deepEqual(await loadProviderIds(), ["charm-hyper", "reload-provider"]);
 		await rm(providerPath);
-		assert.deepEqual(await loadProviderIds(), []);
+		assert.deepEqual(await loadProviderIds(), ["charm-hyper"]);
 	} finally {
 		await rm(root, { recursive: true, force: true });
 	}
@@ -307,7 +354,7 @@ test("the package entrypoint isolates an invalid adapter and reports its capabil
 		await writeFile(
 			join(providersDir, "valid.ts"),
 			`
-import { defineProviderExtension } from "${join(import.meta.dirname, "../index.ts")}";
+import { defineProviderExtension } from "@hyav/pi-provider";
 export default defineProviderExtension({
   id: "valid-after-invalid",
   create: () => ({
@@ -570,7 +617,7 @@ test("Host schedules one non-blocking model catalog refresh for startup and relo
 	assert.equal(pi.modelRefreshCalls, 2);
 });
 
-test("Host isolates malformed envelopes and excludes every duplicate ID or binding", async () => {
+test("Host isolates malformed envelopes and resolves duplicate IDs to the latest registration", async () => {
 	const pi = new TestPi();
 	const host = createPiProviderHost({ enableOfficialPricingFallback: false });
 	host(pi as unknown as ExtensionAPI);
@@ -641,25 +688,26 @@ test("Host isolates malformed envelopes and excludes every duplicate ID or bindi
 	await command.handler("refresh", context);
 	assert.ok(pi.providers.has("good-provider"));
 	assert.ok(pi.providers.has("status-provider"));
-	assert.equal(pi.providers.has("conflict-provider"), false);
+	assert.ok(pi.providers.has("preflight-provider"));
+	assert.equal(pi.providers.get("conflict-provider")?.models[0]?.id, "two");
 	assert.match(notifications.at(-1) ?? "", /Status: fresh/);
 
 	const statusProviderContext = createContext(pi, "status-provider");
 	const conflictNotifications: string[] = [];
 	statusProviderContext.ui.notify = (message) => conflictNotifications.push(message);
-	await command.handler("", statusProviderContext);
-	assert.match(conflictNotifications.at(-1) ?? "", /Status: not supported/);
+	await command.handler("refresh", statusProviderContext);
+	assert.match(conflictNotifications.at(-1) ?? "", /Status: fresh/);
 
 	const preflightContext = createContext(pi, "preflight-provider");
 	const preflightNotifications: string[] = [];
 	preflightContext.ui.notify = (message) => preflightNotifications.push(message);
-	await command.handler("", preflightContext);
-	assert.match(preflightNotifications.at(-1) ?? "", /Preflight: not configured/);
+	await command.handler("refresh", preflightContext);
+	assert.match(preflightNotifications.at(-1) ?? "", /Preflight: passed/);
 
 	const beforeRequest = pi.handlers.get("before_provider_request")?.[0];
 	assert.ok(beforeRequest);
 	const transformed = await beforeRequest({ payload: { order: [] } }, context);
-	assert.deepEqual(transformed, { order: ["good"] });
+	assert.deepEqual(transformed, { order: ["second", "good"] });
 });
 
 test("Host reapplies official pricing when it re-registers an accepted Provider", async () => {

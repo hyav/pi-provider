@@ -1,7 +1,5 @@
-import { defineStatusExtension } from "../core/adapter-extensions.ts";
-import { ProviderDataError } from "../core/errors.ts";
-import { parseRetryAfter } from "../core/retry-after.ts";
-import type { StatusAdapter, StatusSnapshot } from "../core/types.ts";
+import type { StatusAdapter, StatusSnapshot } from "@hyav/pi-provider";
+import { defineStatusExtension, ProviderDataError, parseRetryAfter } from "@hyav/pi-provider";
 import { hyperJsonHeaders } from "../providers/charm-hyper/constants.ts";
 
 const CREDITS_URL = "https://hyper.charm.land/v1/credits";

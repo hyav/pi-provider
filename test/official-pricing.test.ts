@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
-import { homedir, tmpdir } from "node:os";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import {
@@ -16,18 +16,11 @@ import {
 } from "../core/official-pricing.ts";
 import type { ProviderModelDraft } from "../core/types.ts";
 
-test("stores provider metadata under Pi's resolved agent directory", () => {
-	const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
-	process.env.PI_CODING_AGENT_DIR = "~/configured-pi-agent";
-	try {
-		assert.equal(
-			getDefaultOpenRouterMetadataCachePath(),
-			join(homedir(), "configured-pi-agent", "pi-provider", "openrouter-model-metadata.json"),
-		);
-	} finally {
-		if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
-		else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
-	}
+test("stores provider metadata under the injected agent directory", () => {
+	assert.equal(
+		getDefaultOpenRouterMetadataCachePath("/users/example/pi-agent"),
+		join("/users/example/pi-agent", "pi-provider", "openrouter-model-metadata.json"),
+	);
 });
 
 test("parseOpenRouterPricing correctly maps prompt/completion prices and tiers overrides", () => {

@@ -1,6 +1,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { loadPackageAdapterExtensions } from "./core/adapter-loader.ts";
-import { createPiProviderHost } from "./core/host.ts";
+import { getAgentDir, readStoredCredential } from "@earendil-works/pi-coding-agent";
+import { wrapTextWithAnsi } from "@earendil-works/pi-tui";
+import { createJiti } from "jiti";
 import type { PiProviderDependencies } from "./core/runtime-config.ts";
 
 export type {
@@ -16,6 +17,7 @@ export {
 	defineStatusExtension,
 	defineTunerExtension,
 } from "./core/adapter-extensions.ts";
+export { withDeadline } from "./core/deadline.ts";
 export type { ProviderDataErrorLike } from "./core/errors.ts";
 export { isProviderDataError, ProviderDataError } from "./core/errors.ts";
 export type {
@@ -59,6 +61,7 @@ export {
 	parseOpenRouterPricing,
 	setPricingCache,
 } from "./core/official-pricing.ts";
+export { createOpenCodeCatalogPreflightAdapter } from "./core/opencode-preflight.ts";
 export type {
 	PreflightAdapter,
 	PreflightContext,
@@ -70,6 +73,8 @@ export type {
 } from "./core/preflight-manager.ts";
 export { getPreflightKey, normalizePreflightSnapshot, PreflightManager } from "./core/preflight-manager.ts";
 export { applyPricingAdjustment, resolvePricingDetails } from "./core/pricing-adjustments.ts";
+export { normalizeProviderModels } from "./core/provider-registration.ts";
+export { parseRetryAfter } from "./core/retry-after.ts";
 export type { StatusDiagnostics, StatusErrorState } from "./core/status-manager.ts";
 export { normalizeStatusSnapshot, StatusManager } from "./core/status-manager.ts";
 export { applyTunerAdapters, sortTunerAdapters } from "./core/tuner-manager.ts";
@@ -109,7 +114,7 @@ export type {
 } from "./core/types.ts";
 
 export interface PiProviderExtensionOptions {
-	/** Package root containing providers, status, preflight, and tuners directories. */
+	/** User adapter root; replaces the default `<agentDir>/pi-provider` directory. */
 	adapterRoot?: string;
 	/** Host runtime dependency overrides. */
 	dependencies?: Partial<PiProviderDependencies>;
@@ -119,10 +124,27 @@ export interface PiProviderExtensionOptions {
 export function createPiProviderExtension(
 	options: PiProviderExtensionOptions = {},
 ): (pi: ExtensionAPI) => Promise<void> {
-	const piProviderHost = createPiProviderHost(options.dependencies);
 	return async (pi) => {
-		piProviderHost(pi);
-		await loadPackageAdapterExtensions(pi, options.adapterRoot);
+		const jiti = createJiti(import.meta.url, { moduleCache: true, tryNative: false });
+		const { runPiProviderEntry } = (await jiti.import("./core/runtime-entry.ts")) as {
+			runPiProviderEntry: (
+				pi: ExtensionAPI,
+				entry: {
+					agentDir: string;
+					readStoredCredential: typeof readStoredCredential;
+					wrapTextWithAnsi: typeof wrapTextWithAnsi;
+					adapterRoot?: string;
+					dependencies?: Partial<PiProviderDependencies>;
+				},
+			) => Promise<void>;
+		};
+		await runPiProviderEntry(pi, {
+			agentDir: getAgentDir(),
+			readStoredCredential,
+			wrapTextWithAnsi,
+			adapterRoot: options.adapterRoot,
+			dependencies: options.dependencies,
+		});
 	};
 }
 

@@ -1,7 +1,5 @@
-import { defineStatusExtension } from "../core/adapter-extensions.ts";
-import { ProviderDataError } from "../core/errors.ts";
-import { parseRetryAfter } from "../core/retry-after.ts";
-import type { StatusAdapter, StatusSnapshot } from "../core/types.ts";
+import type { StatusAdapter, StatusSnapshot } from "@hyav/pi-provider";
+import { defineStatusExtension, ProviderDataError, parseRetryAfter } from "@hyav/pi-provider";
 
 export const DEEPSEEK_BALANCE_URL = "https://api.deepseek.com/user/balance";
 

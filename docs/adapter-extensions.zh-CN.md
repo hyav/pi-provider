@@ -8,7 +8,7 @@
 
 用户与开发者可以通过以下方式扩展 Pi Provider 能力，无需修改 Pi Provider 的 `index.ts`：
 
-1. 在已安装包的对应 capability 目录中添加或删除 TypeScript 文件；
+1. 在 capability 目录中添加或删除 TypeScript 文件——可以在 Host 包内（内置 Adapter），也可以在 Pi 解析出的 agent 目录 `<agent-dir>/pi-provider/` 下（用户 Adapter）；
 2. 安装另一个本地、npm 或 Git Pi 扩展包；
 3. 执行 `/reload`。
 
@@ -26,6 +26,18 @@ package-root/
   preflight/*.ts           # Preflight Adapter Extensions
   tuners/*.ts              # Tuner Adapter Extensions
 ```
+
+Host 还会在 Pi 解析出的 agent 目录下发现用户 Adapter，无需改动任何包：
+
+```text
+<agent-dir>/pi-provider/
+  providers/*.ts           # 用户 Provider Adapter Extensions
+  status/*.ts              # 用户 Status Adapter Extensions
+  preflight/*.ts           # 用户 Preflight Adapter Extensions
+  tuners/*.ts              # 用户 Tuner Adapter Extensions
+```
+
+先扫描内置 capability 目录，后扫描用户目录，因此同 ID 的用户文件会覆盖内置 Adapter。`createPiProviderExtension({ adapterRoot })` 用自定义根替换默认用户目录；内置目录始终被扫描。
 
 Host 包仅向 Pi 声明根入口。根入口在启动和 `/reload` 时扫描自身 capability 目录，因此 Pi 将整个 Host 包显示为一个 extension，同时仍能通过增删文件扩展能力：
 
@@ -65,7 +77,7 @@ Host capability 目录中的文件与独立包中被通配符匹配的文件都�
 
 ## 文件契约
 
-每个能力文件使用对应的 helper 导出单一适配器：
+每个能力文件使用对应的 helper 导出单一适配器。`providers/`、`status/`、`preflight/` 下的内置 Adapter 遵循完全相同的写法，可作为参考模板：复制到 `<agent-dir>/pi-provider/` 后直接修改即可。只有 Charm Hyper 相关文件（以及 `preflight/openai-codex.ts`）额外依赖包内私有辅助文件，因此新增 Adapter 时建议以 `preflight/deepseek.ts`、`status/deepseek.ts` 或 `providers/` 下的简单文件为蓝本。
 
 ```ts
 // providers/example.ts
@@ -92,7 +104,7 @@ Helper 会在实例化前校验静态身份描述符，并确认最终 Adapter �
 ## 生命周期
 
 ### 1. Extension Factory 阶段
-Pi 在启动与 `/reload` 时重新执行 Host 根 extension factory。根入口先创建 Host，再按确定性路径顺序扫描 capability 目录，以禁用模块缓存的方式加载每个当前存在的 `.ts` 或 `.js` 文件。独立 Adapter 包仍由 Pi 根据自身 manifest 加载。适配器 helper 会：
+Pi 在启动与 `/reload` 时重新执行 Host 根 extension factory。根入口先创建 Host，再按确定性路径顺序先扫描内置 capability 目录、后扫描用户目录（`<agent-dir>/pi-provider/` 或 `adapterRoot` 覆盖），加载每个当前存在的 `.ts` 或 `.js` 文件。所有 Adapter 在每次加载中共享同一模块缓存，因此被多个 Adapter 引用的文件只会执行一次。独立 Adapter 包仍由 Pi 根据自身 manifest 加载。适配器 helper 会：
 
 1. 校验静态描述符；
 2. 实例化 Adapter；
@@ -120,7 +132,7 @@ Host 的排序规则为：
 ## 校验与故障隔离
 
 - 缺失 ID、空白 ID、身份不匹配、无效时钟配置将使对应模块失效；
-- 重复 Adapter ID 或冲突绑定将被同时排除，防止因加载顺序造成隐式胜出；
+- 重复 Adapter ID 或冲突绑定保留最新注册（用户适配器在内置之后加载，因此可覆盖内置）并发出警告，较早的条目被丢弃；
 - Provider 冲突会清理动态覆盖，在存在原生 Provider 时恢复原生实现；
 - 模块抛出异常、注册信封损坏或 default export 缺失仅隔离该模块，不影响其他健康适配器；加载失败使用 capability 相对路径报告，不暴露安装绝对路径；
 - Status 和 Preflight Adapter 可以绑定由 Pi Provider 管理的 Provider 或 Pi 原生 Provider。无法解析的绑定只隔离对应 Adapter，并报告诊断警告。

@@ -1,7 +1,5 @@
-import { definePreflightExtension } from "../core/adapter-extensions.ts";
-import { ProviderDataError } from "../core/errors.ts";
-import type { PreflightAdapter } from "../core/preflight-manager.ts";
-import { parseRetryAfter } from "../core/retry-after.ts";
+import type { PreflightAdapter } from "@hyav/pi-provider";
+import { definePreflightExtension, ProviderDataError, parseRetryAfter } from "@hyav/pi-provider";
 import { hyperJsonHeaders } from "../providers/charm-hyper/constants.ts";
 import { HYPER_MODELS_URL, HYPER_PROVIDER_URL, parseHyperModels } from "../providers/charm-hyper.ts";
 

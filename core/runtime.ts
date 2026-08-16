@@ -1,6 +1,4 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { readStoredCredential } from "@earendil-works/pi-coding-agent";
-import { wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import type { PiProviderDefinition } from "./definition.ts";
 import { validatePiProviderDefinition } from "./definition.ts";
 import { LiveCheckManager, type LiveCheckResult } from "./live-check-manager.ts";
@@ -33,6 +31,7 @@ import type {
 	ProviderCost,
 	ProviderModelDraft,
 	ProviderModelMetadata,
+	StoredCredentialLike,
 } from "./types.ts";
 
 type ActiveModel = NonNullable<ExtensionContext["model"]>;
@@ -41,7 +40,10 @@ type StatusNotificationContext = Pick<ExtensionContext, "modelRegistry" | "ui"> 
 };
 const STATUS_WIDGET_KEY = "pi-provider-status";
 
-function readProviderCredentialMetadata(provider: string): unknown {
+function readProviderCredentialMetadata(
+	provider: string,
+	readStoredCredential: (providerId: string) => StoredCredentialLike | undefined,
+): unknown {
 	try {
 		const credential = readStoredCredential(provider);
 		if (credential?.type !== "oauth") return undefined;
@@ -59,7 +61,11 @@ function clearTransientStatus(ctx: Pick<ExtensionContext, "ui">): void {
 	ctx.ui.setWidget(STATUS_WIDGET_KEY, undefined);
 }
 
-function showTransientStatus(message: string, ctx: StatusNotificationContext): boolean {
+function showTransientStatus(
+	message: string,
+	ctx: StatusNotificationContext,
+	wrapTextWithAnsi: (text: string, width: number) => string[],
+): boolean {
 	if ((ctx.mode !== "tui" && ctx.mode !== "rpc") || typeof ctx.ui.setWidget !== "function") return false;
 	// RPC cannot render component factories, so keep its plain text protocol unchanged.
 	if (ctx.mode === "rpc") {
@@ -301,7 +307,7 @@ export function installPiProviderRuntime(
 		);
 		const message = report.report;
 		if (report.warningLevel !== "hard") {
-			statusPresentationVisible = showTransientStatus(message, ctx);
+			statusPresentationVisible = showTransientStatus(message, ctx, runtime.wrapTextWithAnsi);
 			if (!statusPresentationVisible) ctx.ui.notify(message, "info");
 			return;
 		}
@@ -335,7 +341,7 @@ export function installPiProviderRuntime(
 				model,
 				modelRegistry: ctx.modelRegistry,
 				getCredentialKey: () => ctx.modelRegistry.getApiKeyForProvider(model.provider),
-				getCredentialMetadata: () => readProviderCredentialMetadata(model.provider),
+				getCredentialMetadata: () => readProviderCredentialMetadata(model.provider, runtime.readStoredCredential),
 			};
 			const preflightContext: PreflightContextLike = { model, modelRegistry: ctx.modelRegistry };
 			const refreshChecks: Array<Promise<unknown>> = [];

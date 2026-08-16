@@ -1936,3 +1936,58 @@ test("reports native Pi catalogs and local preflight without registering a dupli
 	assert.match(report, /Preflight: native · provider\/auth\/catalog/);
 	assert.doesNotMatch(report, /not managed by Pi Provider/);
 });
+
+test("injects the stored credential reader and text wrapper into status reporting", async () => {
+	const commands: Record<string, any> = {};
+	let seenCredentialMetadata: unknown;
+	let wrapCalls = 0;
+	const extension = createPiProviderRuntime(
+		async () =>
+			providerDefinition("injected-deps", async (context) => {
+				seenCredentialMetadata = context.getCredentialMetadata?.();
+				return {
+					entries: [{ kind: "amount", id: "balance", label: "Balance", value: 75, unit: "credits" }],
+					updatedAt: context.now(),
+				};
+			}),
+		{
+			enableOfficialPricingFallback: false,
+			readStoredCredential: () => ({ type: "oauth", teamName: "acme" }),
+			wrapTextWithAnsi: (text, width) => {
+				wrapCalls++;
+				return [text.slice(0, width)];
+			},
+		},
+	);
+	await extension(createPi(commands) as any);
+	const notifications: string[] = [];
+	const widgetUpdates: Array<{ content: unknown }> = [];
+	const ctx: any = authContext("injected-deps");
+	ctx.mode = "tui";
+	ctx.ui.notify = (message: string) => notifications.push(message);
+	ctx.ui.setWidget = (_key: string, content: unknown) => widgetUpdates.push({ content });
+	await commands.status.handler("refresh", ctx);
+
+	assert.deepEqual(seenCredentialMetadata, { type: "oauth", teamName: "acme" });
+	const widgetFactory = widgetUpdates[0]?.content as (
+		tui: unknown,
+		theme: unknown,
+	) => { render(width: number): string[]; invalidate(): void };
+	const widget = widgetFactory({}, { fg: (_color: string, text: string) => text });
+	widget.render(200);
+	assert.ok(wrapCalls > 0);
+});
+
+test("programmatic defaults keep the agent-dir pricing cache path", () => {
+	const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+	const agentDir = join(tmpdir(), "pi-provider-default-agent-");
+	process.env.PI_CODING_AGENT_DIR = agentDir;
+	try {
+		const deps = indexExports.getDefaultPiProviderDependencies();
+		assert.equal(deps.agentDir, agentDir);
+		assert.equal(deps.openRouterMetadataCachePath, join(agentDir, "pi-provider", "openrouter-model-metadata.json"));
+	} finally {
+		if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+		else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+	}
+});

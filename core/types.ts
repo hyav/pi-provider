@@ -22,6 +22,16 @@ export interface ModelMetadataStatus {
 	source?: string;
 }
 
+/**
+ * Narrow credential shape shared across Pi's isolated extension module contexts.
+ * The full Credential type comes from Pi's bundled AI package; consumers of
+ * injected credential readers must not rely on `instanceof` or extra fields.
+ */
+export interface StoredCredentialLike {
+	readonly type?: string;
+	readonly teamName?: string;
+}
+
 export interface ModelFieldSources {
 	contextWindow?: ModelFieldSource;
 	maxTokens?: ModelFieldSource;

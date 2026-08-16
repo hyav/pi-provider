@@ -1,6 +1,5 @@
-import { definePreflightExtension } from "../core/adapter-extensions.ts";
-import { createOpenCodeCatalogPreflightAdapter } from "../core/opencode-preflight.ts";
-import type { PreflightAdapter } from "../core/preflight-manager.ts";
+import type { PreflightAdapter } from "@hyav/pi-provider";
+import { createOpenCodeCatalogPreflightAdapter, definePreflightExtension } from "@hyav/pi-provider";
 
 export const OPENCODE_GO_MODELS_URL = "https://opencode.ai/zen/go/v1/models";
 

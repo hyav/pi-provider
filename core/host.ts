@@ -148,10 +148,11 @@ export function createPiProviderHost(dependencies: Partial<PiProviderDependencie
 			const result: T[] = [];
 			for (const [id, group] of groups) {
 				if (group.length > 1) {
-					warnAdapterIssue(`excluded ${group.length} colliding ${label} entries for ${JSON.stringify(id)}`);
-					continue;
+					warnAdapterIssue(
+						`resolved ${group.length} colliding ${label} entries for ${JSON.stringify(id)} to the latest registration`,
+					);
 				}
-				result.push(group[0]!);
+				result.push(group[group.length - 1]!);
 			}
 			return result;
 		};

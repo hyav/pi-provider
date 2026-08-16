@@ -50,7 +50,27 @@ pi install npm:@hyav/pi-provider
 
 程序化集成可以通过 `createPiProviderRuntime()` 或 `createPiProviderHost()` 配置价格回退、价格策略、请求超时、元数据 URL 和缓存路径；使用自定义 capability 根目录的 Host 包可以调用 `createPiProviderExtension({ adapterRoot, dependencies })`。源码定义 [`PiProviderDependencies`](core/runtime-config.ts) 是权威依据。
 
-在 `@hyav/pi-provider` 的 `providers/`、`status/`、`preflight/` 或 `tuners/` 目录增删 Adapter 文件后，执行 `/reload` 即可重新发现，无需修改 `index.ts`。独立的可信 Adapter 包仍通过自身 Pi manifest 声明 capability 入口。Helper、校验、冲突、reload 行为和生命周期边界见 [Adapter Extension 契约](https://github.com/hyav/pi-provider/blob/main/docs/adapter-extensions.zh-CN.md)。根目录 [`index.ts`](index.ts) 定义公开 TypeScript 导出。
+## Adapter 发现（文件级即插即用）
+
+内置 Adapter 随包发布，始终被扫描。用户 Adapter 放在 Pi 解析出的 agent 目录下，同样会被发现：
+
+```text
+<agent-dir>/pi-provider/
+  providers/   # Provider Adapter 文件
+  status/      # Status Adapter 文件
+  preflight/   # Preflight Adapter 文件
+  tuners/      # Tuner Adapter 文件
+```
+
+在目录中增删文件后执行 `/reload` 即可重新发现，无需改动包。用户 Adapter 在内置之后加载，因此同 ID 的用户文件会覆盖内置 Adapter（Host 保留最新注册并发出警告）。`createPiProviderExtension({ adapterRoot })` 用自定义根替换默认用户目录；内置目录始终被扫描。包内 `providers/`、`status/`、`preflight/` 下的内置 Adapter 就是采用这种写法的参考模板——复制一份改改即可（Charm Hyper 与 `preflight/openai-codex.ts` 还依赖包内私有辅助文件）。
+
+Adapter 文件从 `@hyav/pi-provider` 导入 helper 和类型（加载器内部做了别名映射）：
+
+```ts
+import { defineProviderExtension } from "@hyav/pi-provider";
+```
+
+Adapter 文件不得运行时导入 Pi 的内置包（`@earendil-works/pi-coding-agent`、`@earendil-works/pi-tui`、`@earendil-works/pi-ai`），仅 type-only 导入可以；agent 目录、存储凭据和 ANSI 文本包装器等运行时值由 Pi 入口注入。Helper、校验、冲突、reload 行为和生命周期边界见 [Adapter Extension 契约](https://github.com/hyav/pi-provider/blob/main/docs/adapter-extensions.zh-CN.md)。根目录 [`index.ts`](index.ts) 定义公开 TypeScript 导出。
 
 ## 使用须知
 

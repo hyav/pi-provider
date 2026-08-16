@@ -50,7 +50,27 @@ Use `/status refresh` for free endpoint, authentication, catalog, and account ch
 
 Programmatic integrations can configure pricing fallback, pricing policies, request timeouts, metadata URLs, and cache paths through `createPiProviderRuntime()` or `createPiProviderHost()`. Host packages with a custom capability root can call `createPiProviderExtension({ adapterRoot, dependencies })`. The source definition [`PiProviderDependencies`](core/runtime-config.ts) is authoritative.
 
-Add or remove Adapter files under `@hyav/pi-provider`'s `providers/`, `status/`, `preflight/`, or `tuners/` directories, then run `/reload` to rediscover them without changing `index.ts`. Standalone trusted Adapter packages still declare their capability entries in their own Pi manifest. See the [adapter extension contract](https://github.com/hyav/pi-provider/blob/main/docs/adapter-extensions.md) for helpers, validation, conflicts, reload behavior, and lifecycle boundaries. The root [`index.ts`](index.ts) defines the public TypeScript exports.
+## Adapter discovery (file-level plug and play)
+
+Built-in Adapters ship inside the package and are always discovered. User Adapters live under Pi's resolved agent directory and are discovered too:
+
+```text
+<agent-dir>/pi-provider/
+  providers/   # provider Adapter files
+  status/      # status Adapter files
+  preflight/   # preflight Adapter files
+  tuners/      # tuner Adapter files
+```
+
+Add or remove files there, then run `/reload` to rediscover them without touching the package. User Adapters load after built-ins, so a same-ID file overrides the built-in Adapter (the Host keeps the latest registration and warns). `createPiProviderExtension({ adapterRoot })` replaces the default user directory with a custom root; built-ins are always scanned. The built-in Adapters under the package's `providers/`, `status/`, and `preflight/` are reference templates with this exact shape — copy one and customize it (Charm Hyper and `preflight/openai-codex.ts` also use package-private helpers).
+
+Adapter files import helpers and types from `@hyav/pi-provider` (aliased inside the loader):
+
+```ts
+import { defineProviderExtension } from "@hyav/pi-provider";
+```
+
+Adapter files must not runtime-import Pi's bundled packages (`@earendil-works/pi-coding-agent`, `@earendil-works/pi-tui`, `@earendil-works/pi-ai`); type-only imports are fine. Runtime values such as the agent directory, stored credentials, and the ANSI text wrapper are injected by the Pi entrypoint. See the [adapter extension contract](https://github.com/hyav/pi-provider/blob/main/docs/adapter-extensions.md) for helpers, validation, conflicts, reload behavior, and lifecycle boundaries. The root [`index.ts`](index.ts) defines the public TypeScript exports.
 
 ## Before you use it
 

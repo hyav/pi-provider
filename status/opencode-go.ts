@@ -1,7 +1,5 @@
-import { defineStatusExtension } from "../core/adapter-extensions.ts";
-import { ProviderDataError } from "../core/errors.ts";
-import { parseRetryAfter } from "../core/retry-after.ts";
-import type { StatusAdapter, StatusEntry, StatusSnapshot } from "../core/types.ts";
+import type { StatusAdapter, StatusEntry, StatusSnapshot } from "@hyav/pi-provider";
+import { defineStatusExtension, ProviderDataError, parseRetryAfter } from "@hyav/pi-provider";
 
 export const OPENCODE_GO_USAGE_URL = "https://opencode.ai/zen/go/v1/usage";
 

@@ -6,7 +6,7 @@ This document defines the public contract for dynamically discovered Pi Provider
 
 Users and packages can share Pi Provider capabilities without modifying Pi Provider's `index.ts`:
 
-1. Add or remove TypeScript files inside a package's capability directories;
+1. Add or remove TypeScript files in a capability directory — either inside the Host package (built-in Adapters) or under Pi's resolved agent directory `<agent-dir>/pi-provider/` (user Adapters);
 2. Install another local, npm, or Git Pi package;
 3. Execute `/reload`.
 
@@ -24,6 +24,18 @@ package-root/
   preflight/*.ts           # Preflight Adapter Extensions
   tuners/*.ts              # Tuner Adapter Extensions
 ```
+
+The Host also discovers user Adapters under Pi's resolved agent directory, without touching any package:
+
+```text
+<agent-dir>/pi-provider/
+  providers/*.ts           # user Provider Adapter Extensions
+  status/*.ts              # user Status Adapter Extensions
+  preflight/*.ts           # user Preflight Adapter Extensions
+  tuners/*.ts              # user Tuner Adapter Extensions
+```
+
+Built-in capability directories are scanned first and the user directory second, so a user file with the same Adapter ID overrides the built-in one. `createPiProviderExtension({ adapterRoot })` replaces the default user directory with a custom root; built-ins are always scanned.
 
 The Host package declares only its root Pi entrypoint. The root scans its capability directories at startup and on `/reload`, so Pi displays the Host package as one extension while file-level additions and removals remain discoverable:
 
@@ -61,7 +73,7 @@ Only core host packages provided by Pi should use `peerDependencies` with `"*"`.
 
 ## File Contract
 
-Each capability file contributes exactly one adapter using its designated helper:
+Each capability file contributes exactly one adapter using its designated helper. The built-in Adapters under `providers/`, `status/`, and `preflight/` follow this exact shape and are the reference templates: copy one into `<agent-dir>/pi-provider/` and customize it. Only the Charm Hyper files (and `preflight/openai-codex.ts`) additionally import package-private helper files, so prefer `preflight/deepseek.ts`, `status/deepseek.ts`, or `providers/` peers as the base for new Adapters.
 
 ```ts
 // providers/example.ts
@@ -90,7 +102,7 @@ Helpers validate static identity descriptors before instantiation and verify tha
 
 ### Extension Factory Phase
 
-Pi re-executes the Host root extension factory upon startup and `/reload`. The root creates the Host, scans the capability directories in deterministic path order, and loads every current `.ts` or `.js` file with module caching disabled. Pi continues to load standalone Adapter packages from their own manifests. The Adapter helper:
+Pi re-executes the Host root extension factory upon startup and `/reload`. The root creates the Host, scans the built-in capability directories and then the user directory (`<agent-dir>/pi-provider/` or the `adapterRoot` override) in deterministic path order, and loads every current `.ts` or `.js` file. All Adapters share one module cache per load, so a file imported by more than one Adapter executes exactly once. Pi continues to load standalone Adapter packages from their own manifests. The Adapter helper:
 
 1. Validates the static descriptor;
 2. Instantiates the Adapter;
@@ -119,7 +131,7 @@ The previous Host aborts inflight requests, clears caches and diagnostics, and u
 ## Validation and Fault Isolation
 
 - Empty IDs, whitespace IDs, mismatched identities, invalid timing options, and malformed adapter shapes invalidate the affected module.
-- Duplicate Adapter IDs within the same capability or duplicate Status/Preflight bindings for the same Provider exclude all conflicting entries to prevent load-order ambiguity.
+- Duplicate Adapter IDs within the same capability or duplicate Status/Preflight bindings for the same Provider keep the latest registration (user adapters load after built-ins, so they override) and warn; earlier entries are dropped.
 - Provider conflicts clean up dynamic overrides, restoring native built-ins when present.
 - A missing default export, thrown factory exception, or corrupted envelope isolates only the failing file without impacting healthy adapters. Load failures use capability-relative paths instead of exposing absolute installation paths.
 - Status and Preflight adapters can bind to providers managed by Pi Provider or to native Pi Providers. Unresolvable bindings isolate the individual adapter and report diagnostic warnings.

@@ -1,7 +1,5 @@
-import { definePreflightExtension } from "../core/adapter-extensions.ts";
-import { ProviderDataError } from "../core/errors.ts";
-import type { PreflightAdapter } from "../core/preflight-manager.ts";
-import { parseRetryAfter } from "../core/retry-after.ts";
+import type { PreflightAdapter } from "@hyav/pi-provider";
+import { definePreflightExtension, ProviderDataError, parseRetryAfter } from "@hyav/pi-provider";
 import { extractCodexAccountId } from "../status/openai-codex.ts";
 
 export const CODEX_MODELS_URL = "https://chatgpt.com/backend-api/codex/models";
