@@ -609,7 +609,7 @@ test("Host reapplies OpenRouter metadata after a non-blocking refresh", async ()
 			attempt < 100 && pi.providers.get("host-background-pricing")?.models[0]?.cost.input !== 1;
 			attempt++
 		) {
-			await new Promise((resolve) => setImmediate(resolve));
+			await new Promise((resolve) => setTimeout(resolve, 10));
 		}
 		assert.equal(pi.providers.get("host-background-pricing")?.models[0]?.cost.input, 1);
 		assert.equal(pi.providers.get("host-background-pricing")?.models[0]?.cost.output, 2);

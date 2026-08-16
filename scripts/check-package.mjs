@@ -7,6 +7,10 @@ import { discoverAndLoadExtensions } from "@earendil-works/pi-coding-agent";
 
 const repositoryRoot = fileURLToPath(new URL("..", import.meta.url));
 const temporaryRoot = mkdtempSync(join(tmpdir(), "pi-provider-artifact-"));
+const nestedNpmEnvironment = Object.fromEntries(
+	Object.entries(process.env).filter(([key]) => key.toLowerCase() !== "npm_config_dry_run"),
+);
+nestedNpmEnvironment.npm_config_dry_run = "false";
 
 const requiredFiles = [
 	"index.ts",
@@ -56,6 +60,7 @@ function run() {
 	const output = execFileSync("npm", ["pack", "--pack-destination", temporaryRoot, "--json", "--dry-run=false"], {
 		cwd: repositoryRoot,
 		encoding: "utf8",
+		env: nestedNpmEnvironment,
 	});
 	const metadata = JSON.parse(output)[0];
 	if (!metadata?.filename || !Array.isArray(metadata.files)) throw new Error("npm pack returned invalid metadata");
@@ -108,7 +113,7 @@ function run() {
 			"--no-audit",
 			archivePath,
 		],
-		{ stdio: "pipe" },
+		{ stdio: "pipe", env: nestedNpmEnvironment },
 	);
 
 	for (const name of peerNames) {
