@@ -1,6 +1,6 @@
 {
   "name": "@hyav/pi-provider",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Provider extension toolkit for Pi to integrate and manage custom LLM providers with dynamic models, request tuners, and account status.",
   "author": "hyav",
   "license": "MIT",
