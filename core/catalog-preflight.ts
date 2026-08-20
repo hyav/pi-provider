@@ -13,8 +13,16 @@ export interface CatalogPreflightConfig {
 	providerId: string;
 	name: string;
 	modelsUrl: string;
-	/** Key header name such as "x-goog-api-key"; defaults to Authorization Bearer. */
+	/**
+	 * Key header name such as "x-goog-api-key" or "x-api-key". When set, the
+	 * key-only header is used. Defaults to Authorization Bearer.
+	 */
 	keyHeader?: string;
+	/**
+	 * Provider-specific authentication for dual-mode providers. When set it
+	 * decides the request auth headers from the resolved credential type.
+	 */
+	authHeaders?: (apiKey: string, credential: string | undefined) => Record<string, string>;
 	/** Additional static headers such as {"anthropic-version": "2023-06-01"}. */
 	headers?: Record<string, string>;
 	/** Filter for usable entries; defaults to accepting every record with a non-empty `id`. */
@@ -35,15 +43,22 @@ export function createCatalogPreflightAdapter(
 		requestTimeoutMs,
 		async fetch(context) {
 			const apiKey = await context.getApiKey();
+			const credential = context.getCredentialType
+				? await context.getCredentialType().catch(() => undefined)
+				: undefined;
 			const headers: Record<string, string> = {
 				Accept: "application/json",
 				"Accept-Encoding": "identity",
 				...(config.headers ?? {}),
 			};
-			if (config.keyHeader) {
-				if (apiKey && apiKey !== "proxy-managed") headers[config.keyHeader] = apiKey;
-			} else if (apiKey && apiKey !== "proxy-managed") {
-				headers.Authorization = `Bearer ${apiKey}`;
+			if (apiKey && apiKey !== "proxy-managed") {
+				if (config.authHeaders) {
+					Object.assign(headers, config.authHeaders(apiKey, credential));
+				} else if (config.keyHeader) {
+					headers[config.keyHeader] = apiKey;
+				} else {
+					headers.Authorization = `Bearer ${apiKey}`;
+				}
 			}
 			const response = await context.fetch(config.modelsUrl, { headers, signal: context.signal });
 			if (!response.ok) {

@@ -6,10 +6,21 @@ import { defineStatusExtension, ProviderDataError, parseRetryAfter } from "@hyav
  * usage credit. Not part of the public platform API contract, so the URL is
  * overridable: ANTHROPIC_USAGE_URL, or set it to an empty string to disable.
  */
+export const DEFAULT_ANTHROPIC_USAGE_URL = "https://claude.ai/api/usage";
 export const ANTHROPIC_USAGE_URL =
 	typeof process !== "undefined" && process.env.ANTHROPIC_USAGE_URL !== undefined
 		? process.env.ANTHROPIC_USAGE_URL
-		: "https://claude.ai/api/usage";
+		: DEFAULT_ANTHROPIC_USAGE_URL;
+
+/**
+ * Anthropic API keys are `sk-ant-...`; the subscription OAuth access tokens
+ * used by Claude web/Claude Code are not. Only the subscription tokens may be
+ * sent to the Claude web usage endpoint. This keeps API keys resolved from
+ * environment variables, models.json, or a runtime from ever reaching it.
+ */
+export function isAnthropicApiKey(key: string): boolean {
+	return key.startsWith("sk-ant-") || key.startsWith("sk-ant-api");
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -131,67 +142,107 @@ async function credentialType(context: Parameters<StatusAdapter["fetch"]>[0]): P
 	}
 }
 
-export const anthropicStatusAdapter: StatusAdapter = {
-	id: "anthropic-status",
-	providerId: "anthropic",
-	name: "Anthropic",
-	cacheTtlMs: 60_000,
-	requestTimeoutMs: 8_000,
-	async fetch(context): Promise<StatusSnapshot> {
-		const key = await context.getApiKey();
-		if (!key || key === "proxy-managed") {
-			throw new ProviderDataError("Anthropic status requires authentication", "auth");
-		}
-		const credential = await credentialType(context);
-		const isApiKey = credential === "api_key";
+function apiKeyEntries(): StatusEntry[] {
+	return [
+		{ kind: "text", id: "auth", label: "Auth", value: "API key" },
+		{ kind: "text", id: "usage", label: "Usage", value: "not available from the subscription endpoint" },
+	];
+}
 
-		if (isApiKey) {
-			if (!ANTHROPIC_USAGE_URL.trim()) {
+export interface AnthropicStatusOptions {
+	/** Usage endpoint override; defaults to ANTHROPIC_USAGE_URL. */
+	usageUrl?: string;
+}
+
+export function createAnthropicStatusAdapter(
+	requestTimeoutMs: number,
+	options: AnthropicStatusOptions = {},
+): StatusAdapter {
+	const usageUrl = (options.usageUrl ?? ANTHROPIC_USAGE_URL).trim();
+	return {
+		id: "anthropic-status",
+		providerId: "anthropic",
+		name: "Anthropic",
+		cacheTtlMs: 60_000,
+		requestTimeoutMs,
+		async fetch(context): Promise<StatusSnapshot> {
+			const key = await context.getApiKey();
+			if (!key || key === "proxy-managed") {
+				throw new ProviderDataError("Anthropic status requires authentication", "auth");
+			}
+			const credential = await credentialType(context);
+			const isOAuth = credential === "oauth" && !isAnthropicApiKey(key);
+			if (usageUrl === "") {
 				return {
 					entries: [{ kind: "text", id: "usage", label: "Usage", value: "disabled" }],
 					updatedAt: context.now(),
 				};
 			}
-			// Default endpoint is subscription-only; document the override for API keys.
-			return {
-				entries: [
-					{ kind: "text", id: "auth", label: "Auth", value: "API key" },
-					{ kind: "text", id: "usage", label: "Usage", value: "requires ANTHROPIC_USAGE_URL" },
-				],
-				updatedAt: context.now(),
-			};
-		}
-		// OAuth (Claude Pro/Max) and unknown credentials use the usage endpoint.
-		const response = await context.fetch(ANTHROPIC_USAGE_URL, {
-			headers: {
-				Accept: "application/json",
-				"Accept-Encoding": "identity",
-				Authorization: `Bearer ${key}`,
-				"User-Agent": "@hyav/pi-provider",
-			},
-			signal: context.signal,
-		});
-		if (!response.ok) {
-			throw new ProviderDataError(
-				`Anthropic status failed: HTTP ${response.status}`,
-				`http${response.status}`,
-				parseRetryAfter(response.headers.get("retry-after"), context.now()),
-				response.status,
-			);
-		}
-		let payload: unknown;
-		try {
-			payload = await response.json();
-		} catch {
-			throw new ProviderDataError("Anthropic status returned invalid JSON", "badjson");
-		}
-		return { entries: usageEntries(payload), updatedAt: context.now() };
-	},
-};
 
-export function createAnthropicStatusAdapter(requestTimeoutMs: number): StatusAdapter {
-	return { ...anthropicStatusAdapter, requestTimeoutMs };
+			if (!isOAuth) {
+				if (usageUrl === DEFAULT_ANTHROPIC_USAGE_URL) {
+					// The default endpoint is subscription-only. Never send an
+					// API key there; the user can configure a custom endpoint
+					// via ANTHROPIC_USAGE_URL if they run their own queries.
+					return { entries: apiKeyEntries(), updatedAt: context.now() };
+				}
+				// Explicitly configured custom endpoint: send as x-api-key only.
+				const response = await context.fetch(usageUrl, {
+					headers: {
+						Accept: "application/json",
+						"Accept-Encoding": "identity",
+						"x-api-key": key,
+						"User-Agent": "@hyav/pi-provider",
+					},
+					signal: context.signal,
+				});
+				if (!response.ok) {
+					throw new ProviderDataError(
+						`Anthropic status failed: HTTP ${response.status}`,
+						`http${response.status}`,
+						parseRetryAfter(response.headers.get("retry-after"), context.now()),
+						response.status,
+					);
+				}
+				let payload: unknown;
+				try {
+					payload = await response.json();
+				} catch {
+					throw new ProviderDataError("Anthropic status returned invalid JSON", "badjson");
+				}
+				return { entries: usageEntries(payload), updatedAt: context.now() };
+			}
+
+			// OAuth (Claude Pro/Max) uses the usage endpoint with the subscription Bearer token.
+			const response = await context.fetch(usageUrl, {
+				headers: {
+					Accept: "application/json",
+					"Accept-Encoding": "identity",
+					Authorization: `Bearer ${key}`,
+					"User-Agent": "@hyav/pi-provider",
+				},
+				signal: context.signal,
+			});
+			if (!response.ok) {
+				throw new ProviderDataError(
+					`Anthropic status failed: HTTP ${response.status}`,
+					`http${response.status}`,
+					parseRetryAfter(response.headers.get("retry-after"), context.now()),
+					response.status,
+				);
+			}
+			let payload: unknown;
+			try {
+				payload = await response.json();
+			} catch {
+				throw new ProviderDataError("Anthropic status returned invalid JSON", "badjson");
+			}
+			return { entries: usageEntries(payload), updatedAt: context.now() };
+		},
+	};
 }
+
+export const anthropicStatusAdapter = createAnthropicStatusAdapter(8_000);
 
 const anthropicStatusExtension = defineStatusExtension({
 	id: "anthropic-status",

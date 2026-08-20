@@ -15,11 +15,38 @@ function numberValue(value: unknown): number | undefined {
 	return undefined;
 }
 
-/** Reset hint in seconds; providers use bare numbers or formats like `7.66s`. */
+const DURATION_PATTERN = /^((?:\d+(?:\.\d+)?(?:ms|[smhd]))+)$/i;
+const DURATION_PARTS = /(\d+(?:\.\d+)?)(ms|[smhd])/gi;
+const UNIT_SECONDS: Record<string, number> = { ms: 0.001, s: 1, m: 60, h: 3_600, d: 86_400 };
+
+export function durationSeconds(value: string): number | undefined {
+	const matched = DURATION_PATTERN.exec(value.trim());
+	if (!matched?.[1]) return undefined;
+	let total = 0;
+	for (const match of value.matchAll(DURATION_PARTS)) {
+		const amount = Number(match[1]);
+		if (!Number.isFinite(amount)) return undefined;
+		total += amount * (UNIT_SECONDS[match[2]!.toLowerCase()] ?? Number.NaN);
+		if (!Number.isFinite(total)) return undefined;
+	}
+	return total;
+}
+
+/**
+ * Reset hint in seconds. Providers use bare numbers, `7.66s`, and compound
+ * durations like Groq's `2m59.56s`; reset windows like `1d` also appear.
+ */
 export function resetSecondsFromHeader(value: string | null): number | undefined {
-	const number = numberValue(value);
-	if (number === undefined || number <= 0) return undefined;
-	return number;
+	if (value === null || value.trim() === "") return undefined;
+	const trimmed = value.trim();
+	const duration = durationSeconds(trimmed);
+	if (duration === undefined) {
+		const bare = numberValue(trimmed);
+		if (bare === undefined || bare <= 0) return undefined;
+		return bare;
+	}
+	if (duration <= 0) return undefined;
+	return duration;
 }
 
 function parseWindow(headers: Headers, kind: "requests" | "tokens", now: number): RateLimitWindow | undefined {

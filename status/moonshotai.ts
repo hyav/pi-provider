@@ -53,9 +53,12 @@ export interface MoonshotStatusConfig {
 	providerId: string;
 	name: string;
 	balanceUrl: string;
+	/** Official docs: international balances are USD; China balances are CNY. */
+	unit: string;
 }
 
 export function createMoonshotStatusAdapter(config: MoonshotStatusConfig, requestTimeoutMs: number): StatusAdapter {
+	const unit = config.unit;
 	return {
 		id: config.id,
 		providerId: config.providerId,
@@ -97,7 +100,7 @@ export function createMoonshotStatusAdapter(config: MoonshotStatusConfig, reques
 					id: "available-balance",
 					label: "Available balance",
 					value: balance.available,
-					unit: "USD",
+					unit,
 				},
 			];
 			if (balance.voucher !== undefined) {
@@ -106,7 +109,7 @@ export function createMoonshotStatusAdapter(config: MoonshotStatusConfig, reques
 					id: "voucher-balance",
 					label: "Voucher balance",
 					value: balance.voucher,
-					unit: "USD",
+					unit,
 				});
 			}
 			if (balance.cash !== undefined) {
@@ -115,7 +118,7 @@ export function createMoonshotStatusAdapter(config: MoonshotStatusConfig, reques
 					id: "cash-balance",
 					label: "Cash balance",
 					value: balance.cash,
-					unit: "USD",
+					unit,
 				});
 			}
 			return { entries, updatedAt: context.now() };
@@ -124,7 +127,13 @@ export function createMoonshotStatusAdapter(config: MoonshotStatusConfig, reques
 }
 
 export const moonshotaiStatusAdapter = createMoonshotStatusAdapter(
-	{ id: "moonshotai-status", providerId: "moonshotai", name: "Moonshot (Kimi)", balanceUrl: MOONSHOT_BALANCE_URL },
+	{
+		id: "moonshotai-status",
+		providerId: "moonshotai",
+		name: "Moonshot (Kimi)",
+		balanceUrl: MOONSHOT_BALANCE_URL,
+		unit: "USD",
+	},
 	8_000,
 );
 

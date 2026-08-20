@@ -359,8 +359,8 @@ test("first-batch preflights check OpenAI-style catalogs", async () => {
 			url: "https://api.anthropic.com/v1/models",
 			extraHeaders: { "anthropic-version": "2023-06-01" },
 			modelId: "claude-sonnet-4-6",
-			keyHeader: "authorization",
-			keyValue: "Bearer test-key",
+			keyHeader: "x-api-key",
+			keyValue: "test-key",
 		},
 		{
 			adapter: createMistralPreflightAdapter(1_000),
@@ -474,17 +474,17 @@ test("moonshot and hugging face preflights check their catalogs", async () => {
 });
 
 test("Vercel AI Gateway preflight checks a mixed-type catalog", async () => {
-	const { parseVercelModelIds, vercelAIGatewayPreflightAdapter } = await import(
-		"../preflight/vercel-ai-gateway.ts"
-	);
+	const { parseVercelModelIds, vercelAIGatewayPreflightAdapter } = await import("../preflight/vercel-ai-gateway.ts");
 	assert.deepEqual(
-		[...parseVercelModelIds({
-			data: [
-				{ id: "openai/gpt-5.6", type: "language" },
-				{ id: "somewhere/embedding-model", type: "embedding" },
-				{ id: "anthropic/claude-sonnet-4-6" },
-			],
-		})],
+		[
+			...parseVercelModelIds({
+				data: [
+					{ id: "openai/gpt-5.6", type: "language" },
+					{ id: "somewhere/embedding-model", type: "embedding" },
+					{ id: "anthropic/claude-sonnet-4-6" },
+				],
+			}),
+		],
 		["openai/gpt-5.6", "anthropic/claude-sonnet-4-6"],
 	);
 	assert.throws(() => parseVercelModelIds({ data: [] }), /empty catalog/);
@@ -492,10 +492,7 @@ test("Vercel AI Gateway preflight checks a mixed-type catalog", async () => {
 	const snapshot = await vercelAIGatewayPreflightAdapter.fetch({
 		fetch: async (input) => {
 			assert.equal(String(input), "https://ai-gateway.vercel.sh/v1/models");
-			return new Response(
-				JSON.stringify({ data: [{ id: "openai/gpt-5.6", type: "language" }] }),
-				{ status: 200 },
-			);
+			return new Response(JSON.stringify({ data: [{ id: "openai/gpt-5.6", type: "language" }] }), { status: 200 });
 		},
 		getApiKey: async () => "vercel-key",
 		now: () => 99_000,
@@ -505,6 +502,31 @@ test("Vercel AI Gateway preflight checks a mixed-type catalog", async () => {
 		passed: true,
 		checks: ["endpoint", "auth", "catalog"],
 		updatedAt: 99_000,
+		httpStatus: 200,
+	});
+});
+
+test("Anthropic preflight sends Bearer token when credential type is oauth", async () => {
+	const { createAnthropicPreflightAdapter } = await import("../preflight/anthropic.ts");
+	const adapter = createAnthropicPreflightAdapter(1_000);
+	const snapshot = await adapter.fetch({
+		fetch: async (input, init) => {
+			assert.equal(String(input), "https://api.anthropic.com/v1/models");
+			const headers = new Headers(init?.headers);
+			assert.equal(headers.get("authorization"), "Bearer oauth-token");
+			assert.equal(headers.get("x-api-key"), null);
+			assert.equal(headers.get("anthropic-version"), "2023-06-01");
+			return new Response(JSON.stringify({ data: [{ id: "claude-sonnet-4-6" }] }), { status: 200 });
+		},
+		getApiKey: async () => "oauth-token",
+		getCredentialType: async () => "oauth",
+		now: () => 10_000,
+		model: { provider: "anthropic", id: "claude-sonnet-4-6" } as any,
+	});
+	assert.deepEqual(snapshot, {
+		passed: true,
+		checks: ["endpoint", "catalog", "auth"],
+		updatedAt: 10_000,
 		httpStatus: 200,
 	});
 });

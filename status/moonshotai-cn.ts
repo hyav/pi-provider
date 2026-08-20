@@ -8,6 +8,7 @@ export const moonshotaiCnStatusAdapter: StatusAdapter = createMoonshotStatusAdap
 		providerId: "moonshotai-cn",
 		name: "Moonshot CN (Kimi)",
 		balanceUrl: MOONSHOT_CN_BALANCE_URL,
+		unit: "CNY",
 	},
 	8_000,
 );

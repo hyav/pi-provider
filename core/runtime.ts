@@ -46,10 +46,11 @@ function readProviderCredentialMetadata(
 ): unknown {
 	try {
 		const credential = readStoredCredential(provider);
-		if (credential?.type !== "oauth") return undefined;
+		const type = credential?.type;
+		if (type !== "oauth" && type !== "api_key") return undefined;
 		return {
-			type: "oauth",
-			...(typeof credential.teamName === "string" ? { teamName: credential.teamName } : {}),
+			type,
+			...(type === "oauth" && typeof credential?.teamName === "string" ? { teamName: credential.teamName } : {}),
 		};
 	} catch {
 		return undefined;
@@ -337,13 +338,19 @@ export function installPiProviderRuntime(
 		const { status, preflight, auth } = getStatusDetails(model, ctx);
 		let liveCheckRequested = false;
 		if ((mode === "refresh" || mode === "check") && auth.configured) {
+			const getCredentialMetadata = () =>
+				readProviderCredentialMetadata(model.provider, runtime.readStoredCredential);
 			const statusContext: StatusContextLike = {
 				model,
 				modelRegistry: ctx.modelRegistry,
 				getCredentialKey: () => ctx.modelRegistry.getApiKeyForProvider(model.provider),
-				getCredentialMetadata: () => readProviderCredentialMetadata(model.provider, runtime.readStoredCredential),
+				getCredentialMetadata,
 			};
-			const preflightContext: PreflightContextLike = { model, modelRegistry: ctx.modelRegistry };
+			const preflightContext: PreflightContextLike = {
+				model,
+				modelRegistry: ctx.modelRegistry,
+				getCredentialMetadata,
+			};
 			const refreshChecks: Array<Promise<unknown>> = [];
 			if (status) refreshChecks.push(statusManager.update(statusContext, { force: true }));
 			if (preflight) refreshChecks.push(preflightManager.update(preflightContext, { force: true }));

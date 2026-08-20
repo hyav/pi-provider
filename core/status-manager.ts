@@ -1,3 +1,4 @@
+import { deriveCredentialType } from "./credential-type.ts";
 import { isValidTimeoutMs, withDeadline } from "./deadline.ts";
 import { isProviderDataError, ProviderDataError } from "./errors.ts";
 import type {
@@ -230,18 +231,7 @@ export class StatusManager {
 							? {}
 							: {
 									getCredentialMetadata: ctx.getCredentialMetadata,
-									getCredentialType: async () => {
-										try {
-											const metadata = ctx.getCredentialMetadata?.();
-											if (metadata !== null && typeof metadata === "object" && "type" in metadata) {
-												const value = (metadata as { type?: unknown }).type;
-												return typeof value === "string" ? value : undefined;
-											}
-										} catch {
-											// Credential metadata must never break status rendering.
-										}
-										return undefined;
-									},
+									getCredentialType: async () => deriveCredentialType(ctx.getCredentialMetadata?.()),
 								}),
 						now: this.now,
 						signal,

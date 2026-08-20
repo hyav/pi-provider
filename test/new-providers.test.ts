@@ -121,7 +121,7 @@ test("groq status reads x-ratelimit headers", async () => {
 				headers: {
 					"x-ratelimit-limit-requests": "100",
 					"x-ratelimit-remaining-requests": "80",
-					"x-ratelimit-reset-requests": "1d",
+					"x-ratelimit-reset-requests": "2m59.56s",
 				},
 			});
 		}),
@@ -134,6 +134,7 @@ test("groq status reads x-ratelimit headers", async () => {
 	assert.equal(requestsEntry.kind, "window");
 	if (requestsEntry.kind === "window") {
 		assert.equal(requestsEntry.remainingPercent, 80);
+		assert.equal(requestsEntry.resetAt, 1_700_000_179_560);
 	}
 });
 
@@ -176,6 +177,7 @@ test("xai status reads x-ratelimit headers", async () => {
 				headers: {
 					"x-ratelimit-limit-tokens": "1000",
 					"x-ratelimit-remaining-tokens": "500",
+					"x-ratelimit-reset-tokens": "7.66s",
 				},
 			});
 		}),
@@ -188,6 +190,7 @@ test("xai status reads x-ratelimit headers", async () => {
 	assert.equal(tokensEntry.kind, "window");
 	if (tokensEntry.kind === "window") {
 		assert.equal(tokensEntry.remainingPercent, 50);
+		assert.equal(tokensEntry.resetAt, 1_700_000_007_660);
 	}
 });
 
@@ -230,9 +233,9 @@ test("parses moonshot balance payloads", async () => {
 test("moonshot status reads balance for both platforms", async () => {
 	const { moonshotaiStatusAdapter } = await import("../status/moonshotai.ts");
 	const { moonshotaiCnStatusAdapter } = await import("../status/moonshotai-cn.ts");
-	for (const [adapter, expectedUrl] of [
-		[moonshotaiStatusAdapter, "https://api.moonshot.ai/v1/users/me/balance"],
-		[moonshotaiCnStatusAdapter, "https://api.moonshot.cn/v1/users/me/balance"],
+	for (const [adapter, expectedUrl, expectedUnit] of [
+		[moonshotaiStatusAdapter, "https://api.moonshot.ai/v1/users/me/balance", "USD"],
+		[moonshotaiCnStatusAdapter, "https://api.moonshot.cn/v1/users/me/balance", "CNY"],
 	] as const) {
 		const snapshot = await adapter.fetch({
 			...statusContext("moonshot-key", async (input, init) => {
@@ -250,6 +253,10 @@ test("moonshot status reads balance for both platforms", async () => {
 		assert.deepEqual(
 			snapshot.entries.map(({ id }) => id),
 			["available-balance", "voucher-balance", "cash-balance"],
+		);
+		assert.deepEqual(
+			snapshot.entries.map((entry) => (entry.kind === "amount" ? entry.unit : undefined)),
+			[expectedUnit, expectedUnit, expectedUnit],
 		);
 	}
 });
@@ -292,9 +299,62 @@ test("Vercel AI Gateway status reads credits with a Bearer key", async () => {
 		{ kind: "amount", id: "total-used", label: "Total Used", value: 4.5, unit: "USD" },
 	]);
 	await assert.rejects(
-		vercelAIGatewayStatusAdapter.fetch(
-			statusContext("vercel-key", async () => new Response("", { status: 401 })),
-		),
+		vercelAIGatewayStatusAdapter.fetch(statusContext("vercel-key", async () => new Response("", { status: 401 }))),
 		(error: unknown) => error instanceof ProviderDataError && error.code === "auth",
 	);
+});
+
+test("never sends Anthropic API keys to the default subscription endpoint", async () => {
+	const { createAnthropicStatusAdapter } = await import("../status/anthropic.ts");
+	// env/models.json-sourced keys arrive with no credential metadata
+	const adapter = createAnthropicStatusAdapter(8_000);
+	for (const key of ["sk-ant-api03-env-key", "generic-anthropic-key"]) {
+		let requests = 0;
+		const snapshot = await adapter.fetch({
+			...statusContext(key, async () => {
+				requests++;
+				return new Response("unused");
+			}),
+		});
+		assert.equal(requests, 0);
+		assert.deepEqual(snapshot.entries, [
+			{ kind: "text", id: "auth", label: "Auth", value: "API key" },
+			{ kind: "text", id: "usage", label: "Usage", value: "not available from the subscription endpoint" },
+		]);
+	}
+});
+
+test("sends API keys to a configured custom endpoint as x-api-key", async () => {
+	const { createAnthropicStatusAdapter } = await import("../status/anthropic.ts");
+	const adapter = createAnthropicStatusAdapter(8_000, { usageUrl: "https://usage.example.test/anthropic" });
+	const snapshot = await adapter.fetch({
+		...statusContext("sk-ant-api03-env-key", async (input, init) => {
+			assert.equal(String(input), "https://usage.example.test/anthropic");
+			const headers = new Headers(init?.headers);
+			assert.equal(headers.get("x-api-key"), "sk-ant-api03-env-key");
+			assert.equal(headers.get("authorization"), null);
+			return new Response(JSON.stringify({ plan: "API", subscribedUsage: { daily: 5, dailyLimit: 10 } }), {
+				status: 200,
+			});
+		}),
+	});
+	assert.deepEqual(
+		snapshot.entries.map(({ id }) => id),
+		["plan", "daily-usage"],
+	);
+});
+
+test("parses Groq-style duration reset headers", async () => {
+	const { durationSeconds, resetSecondsFromHeader } = await import("../core/ratelimit-headers.ts");
+	assert.equal(durationSeconds("2m59.56s"), 179.56);
+	assert.equal(durationSeconds("7.66s"), 7.66);
+	assert.equal(durationSeconds("250ms"), 0.25);
+	assert.equal(durationSeconds("1d"), 86_400);
+	assert.equal(durationSeconds("1h30m"), 5_400);
+	assert.equal(durationSeconds("not-a-duration"), undefined);
+	assert.equal(resetSecondsFromHeader("2m59.56s"), 179.56);
+	assert.equal(resetSecondsFromHeader("250ms"), 0.25);
+	assert.equal(resetSecondsFromHeader("60"), 60);
+	assert.equal(resetSecondsFromHeader(null), undefined);
+	assert.equal(resetSecondsFromHeader(""), undefined);
 });

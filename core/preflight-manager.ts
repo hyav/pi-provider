@@ -1,4 +1,5 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { deriveCredentialType } from "./credential-type.ts";
 import { isValidTimeoutMs, withDeadline } from "./deadline.ts";
 import { isProviderDataError, ProviderDataError } from "./errors.ts";
 
@@ -12,6 +13,10 @@ export interface PreflightContext {
 	signal?: AbortSignal;
 	now: () => number;
 	model: PreflightModel;
+	/** Optional non-secret credential metadata for provider-specific account labels. */
+	getCredentialMetadata?: () => unknown;
+	/** Optional non-secret credential type ("oauth" vs "api_key") for providers with dual auth modes. */
+	getCredentialType?: () => Promise<string | undefined>;
 }
 
 export interface PreflightSnapshot {
@@ -33,6 +38,8 @@ export interface PreflightAdapter {
 export interface PreflightContextLike {
 	model: PreflightModel;
 	modelRegistry: Pick<ModelRegistry, "getApiKeyForProvider">;
+	/** Optional non-secret credential metadata for provider-specific account labels. */
+	getCredentialMetadata?: () => unknown;
 }
 
 export interface PreflightErrorState {
@@ -182,6 +189,12 @@ export class PreflightManager {
 						now: this.now,
 						signal,
 						model: ctx.model,
+						...(ctx.getCredentialMetadata === undefined
+							? {}
+							: {
+									getCredentialMetadata: ctx.getCredentialMetadata,
+									getCredentialType: async () => deriveCredentialType(ctx.getCredentialMetadata?.()),
+								}),
 					}),
 				adapter.requestTimeoutMs,
 				cancellation.signal,
