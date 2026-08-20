@@ -44,26 +44,32 @@ test("parses anthropic subscription usage payloads", () => {
 
 test("queries anthropic subscription usage with a Bearer token", async () => {
 	const adapter = createAnthropicStatusAdapter(8_000);
-	const snapshot = await adapter.fetch({
-		...statusContext("oauth-token", async (input, init) => {
-			assert.equal(input.toString(), "https://claude.ai/api/usage");
-			const headers = new Headers(init?.headers);
-			assert.equal(headers.get("authorization"), "Bearer oauth-token");
-			assert.equal(headers.get("user-agent"), "@hyav/pi-provider");
-			return new Response(
-				JSON.stringify({
-					plan: "Max",
-					subscribedUsage: { weekly: 20, weeklyLimit: 100 },
-				}),
-				{ status: 200 },
-			);
-		}),
-		getCredentialType: async () => "oauth",
-	});
-	assert.deepEqual(
-		snapshot.entries.map(({ id }) => id),
-		["plan", "weekly-usage"],
-	);
+	for (const [token, credType] of [
+		["oauth-token", "oauth"],
+		["sk-ant-oat01-real-token", "oauth"],
+		["sk-ant-oat01-real-token", undefined],
+	] as const) {
+		const snapshot = await adapter.fetch({
+			...statusContext(token, async (input, init) => {
+				assert.equal(input.toString(), "https://claude.ai/api/usage");
+				const headers = new Headers(init?.headers);
+				assert.equal(headers.get("authorization"), `Bearer ${token}`);
+				assert.equal(headers.get("user-agent"), "@hyav/pi-provider");
+				return new Response(
+					JSON.stringify({
+						plan: "Max",
+						subscribedUsage: { weekly: 20, weeklyLimit: 100 },
+					}),
+					{ status: 200 },
+				);
+			}),
+			...(credType ? { getCredentialType: async () => credType } : {}),
+		});
+		assert.deepEqual(
+			snapshot.entries.map(({ id }) => id),
+			["plan", "weekly-usage"],
+		);
+	}
 });
 
 test("github-copilot status routes around missing usage endpoints", async () => {

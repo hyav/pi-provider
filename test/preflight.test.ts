@@ -506,27 +506,33 @@ test("Vercel AI Gateway preflight checks a mixed-type catalog", async () => {
 	});
 });
 
-test("Anthropic preflight sends Bearer token when credential type is oauth", async () => {
+test("Anthropic preflight sends Bearer token when credential type is oauth or token is sk-ant-oat", async () => {
 	const { createAnthropicPreflightAdapter } = await import("../preflight/anthropic.ts");
 	const adapter = createAnthropicPreflightAdapter(1_000);
-	const snapshot = await adapter.fetch({
-		fetch: async (input, init) => {
-			assert.equal(String(input), "https://api.anthropic.com/v1/models");
-			const headers = new Headers(init?.headers);
-			assert.equal(headers.get("authorization"), "Bearer oauth-token");
-			assert.equal(headers.get("x-api-key"), null);
-			assert.equal(headers.get("anthropic-version"), "2023-06-01");
-			return new Response(JSON.stringify({ data: [{ id: "claude-sonnet-4-6" }] }), { status: 200 });
-		},
-		getApiKey: async () => "oauth-token",
-		getCredentialType: async () => "oauth",
-		now: () => 10_000,
-		model: { provider: "anthropic", id: "claude-sonnet-4-6" } as any,
-	});
-	assert.deepEqual(snapshot, {
-		passed: true,
-		checks: ["endpoint", "catalog", "auth"],
-		updatedAt: 10_000,
-		httpStatus: 200,
-	});
+	for (const [token, credType] of [
+		["oauth-token", "oauth"],
+		["sk-ant-oat01-real-token", "oauth"],
+		["sk-ant-oat01-real-token", undefined],
+	] as const) {
+		const snapshot = await adapter.fetch({
+			fetch: async (input, init) => {
+				assert.equal(String(input), "https://api.anthropic.com/v1/models");
+				const headers = new Headers(init?.headers);
+				assert.equal(headers.get("authorization"), `Bearer ${token}`);
+				assert.equal(headers.get("x-api-key"), null);
+				assert.equal(headers.get("anthropic-version"), "2023-06-01");
+				return new Response(JSON.stringify({ data: [{ id: "claude-sonnet-4-6" }] }), { status: 200 });
+			},
+			getApiKey: async () => token,
+			...(credType ? { getCredentialType: async () => credType } : {}),
+			now: () => 10_000,
+			model: { provider: "anthropic", id: "claude-sonnet-4-6" } as any,
+		});
+		assert.deepEqual(snapshot, {
+			passed: true,
+			checks: ["endpoint", "catalog", "auth"],
+			updatedAt: 10_000,
+			httpStatus: 200,
+		});
+	}
 });

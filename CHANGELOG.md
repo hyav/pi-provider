@@ -6,11 +6,14 @@ This file is the authoritative user-facing release history for `@hyav/pi-provide
 
 - Add Status and Preflight Adapters for the Vercel AI Gateway (auth, model catalog, and credits).
 - Add Status and Preflight Adapters for Pi native providers Moonshot (Kimi) international and China platforms, and Hugging Face router (plan/credits via `whoami-v2`).
+- Report Moonshot balance currency by platform: USD for the international platform and CNY for the China platform.
 - Skip MiniMax Token Plan status: the documented `/coding_plan/remains` endpoint requires a web session cookie, not the API key, and its field semantics are known to be unreliable (see MiniMax-M2 issues #88 and #99).
 - Add first-batch catalog Preflight Adapters for Pi native providers: OpenAI, Anthropic, Mistral, NVIDIA NIM, and Cerebras.
 - Add a shared OpenAI-style catalog preflight helper (`createCatalogPreflightAdapter`).
 - Add Status and Preflight Adapters for Pi native providers: Anthropic (subscription extra usage), OpenRouter (key credits and free tier), Groq (rate-limit headers), xAI (rate-limit headers), and GitHub Copilot (Individual plan quotas).
-- Expose the stored credential type (`oauth` vs `api_key`) to Status Adapters through `getCredentialType()`.
+- Route Anthropic credentials by type: API keys (`sk-ant-api...`) use `x-api-key` for preflight catalog checks and default status without sending keys to subscription endpoints; OAuth tokens (`sk-ant-oat...`) query subscription usage and send `Authorization: Bearer`.
+- Parse compound duration strings (`2m59.56s`, `7.66s`, `250ms`, `1d`, `1h30m`) and bare seconds in rate-limit reset headers for Groq and xAI status adapters.
+- Expose the stored credential type (`oauth` vs `api_key`) to Status and Preflight Adapters through `getCredentialType()`.
 
 ## 0.1.3 - 2026-08-17
 

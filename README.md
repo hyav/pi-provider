@@ -50,6 +50,7 @@ Use `/status refresh` for free endpoint, authentication, catalog, and account ch
 | Name | Required | Default | Effect |
 |---|---:|---|---|
 | `HYPER_API_KEY` | For Charm Hyper API-key auth | None | Supplies the built-in `charm-hyper` provider credential; OAuth users may use `/login` |
+| `ANTHROPIC_USAGE_URL` | No | `https://claude.ai/api/usage` | Custom Anthropic usage endpoint; default endpoint is subscription OAuth only |
 | `PI_CODING_AGENT_DIR` | No | `~/.pi/agent` | Changes Pi's agent directory; public OpenRouter metadata is cached under `<agent-dir>/extensions/pi-provider/` |
 
 Programmatic integrations can configure pricing fallback, pricing policies, request timeouts, metadata URLs, and cache paths through `createPiProviderRuntime()` or `createPiProviderHost()`. Programmatic defaults resolve the agent directory from `PI_CODING_AGENT_DIR` (falling back to `~/.pi/agent`) and keep the OpenRouter metadata cache on disk under `<agent-dir>/extensions/pi-provider/`, matching the table above; the Pi entrypoint overrides it with Pi's own resolution. Host packages with a custom capability root can call `createPiProviderExtension({ adapterRoot, dependencies })`. The source definition [`PiProviderDependencies`](core/runtime-config.ts) is authoritative.

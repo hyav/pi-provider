@@ -13,13 +13,18 @@ export const ANTHROPIC_USAGE_URL =
 		: DEFAULT_ANTHROPIC_USAGE_URL;
 
 /**
- * Anthropic API keys are `sk-ant-...`; the subscription OAuth access tokens
- * used by Claude web/Claude Code are not. Only the subscription tokens may be
- * sent to the Claude web usage endpoint. This keeps API keys resolved from
- * environment variables, models.json, or a runtime from ever reaching it.
+ * Anthropic API keys are `sk-ant-api...`; subscription OAuth access tokens
+ * (used by Claude web / Claude Code) contain `sk-ant-oat...`. Only subscription
+ * tokens may be sent to the Claude web usage endpoint. This keeps API keys
+ * resolved from environment variables, models.json, or a runtime from ever
+ * reaching it.
  */
+export function isAnthropicOAuthToken(key: string): boolean {
+	return key.includes("sk-ant-oat");
+}
+
 export function isAnthropicApiKey(key: string): boolean {
-	return key.startsWith("sk-ant-") || key.startsWith("sk-ant-api");
+	return (key.startsWith("sk-ant-api") || key.startsWith("sk-ant-")) && !isAnthropicOAuthToken(key);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -171,7 +176,7 @@ export function createAnthropicStatusAdapter(
 				throw new ProviderDataError("Anthropic status requires authentication", "auth");
 			}
 			const credential = await credentialType(context);
-			const isOAuth = credential === "oauth" && !isAnthropicApiKey(key);
+			const isOAuth = credential === "oauth" ? !isAnthropicApiKey(key) : isAnthropicOAuthToken(key);
 			if (usageUrl === "") {
 				return {
 					entries: [{ kind: "text", id: "usage", label: "Usage", value: "disabled" }],

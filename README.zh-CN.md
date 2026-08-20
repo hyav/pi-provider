@@ -50,6 +50,7 @@ pi install npm:@hyav/pi-provider
 | 名称 | 必需 | 默认值 | 作用 |
 |---|---:|---|---|
 | `HYPER_API_KEY` | Charm Hyper API Key 鉴权需要 | 无 | 为内置 `charm-hyper` Provider 提供凭据；OAuth 用户可以使用 `/login` |
+| `ANTHROPIC_USAGE_URL` | 否 | `https://claude.ai/api/usage` | 自定义 Anthropic 用量端点；默认端点仅支持订阅 OAuth |
 | `PI_CODING_AGENT_DIR` | 否 | `~/.pi/agent` | 修改 Pi agent 目录；公开 OpenRouter 元数据缓存在 `<agent-dir>/extensions/pi-provider/` 下 |
 
 程序化集成可以通过 `createPiProviderRuntime()` 或 `createPiProviderHost()` 配置价格回退、价格策略、请求超时、元数据 URL 和缓存路径。程序化默认值会从 `PI_CODING_AGENT_DIR`（回退到 `~/.pi/agent`）解析 agent 目录，并保持 OpenRouter 元数据缓存落盘到 `<agent-dir>/extensions/pi-provider/`，与上表一致；Pi 入口会用 Pi 自身的解析覆盖它。使用自定义 capability 根目录的 Host 包可以调用 `createPiProviderExtension({ adapterRoot, dependencies })`。源码定义 [`PiProviderDependencies`](core/runtime-config.ts) 是权威依据。
