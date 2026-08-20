@@ -337,3 +337,109 @@ test("new provider preflights check their authenticated catalogs", async () => {
 		updatedAt: 4_000,
 	});
 });
+
+test("first-batch preflights check OpenAI-style catalogs", async () => {
+	const { createOpenAIPreflightAdapter } = await import("../preflight/openai.ts");
+	const { createAnthropicPreflightAdapter } = await import("../preflight/anthropic.ts");
+	const { createMistralPreflightAdapter } = await import("../preflight/mistral.ts");
+	const { createNvidiaPreflightAdapter } = await import("../preflight/nvidia.ts");
+	const { createCerebrasPreflightAdapter } = await import("../preflight/cerebras.ts");
+
+	const cases = [
+		{
+			adapter: createOpenAIPreflightAdapter(1_000),
+			url: "https://api.openai.com/v1/models",
+			extraHeaders: undefined as Record<string, string> | undefined,
+			modelId: "gpt-5.6",
+			keyHeader: "authorization",
+			keyValue: "Bearer test-key",
+		},
+		{
+			adapter: createAnthropicPreflightAdapter(1_000),
+			url: "https://api.anthropic.com/v1/models",
+			extraHeaders: { "anthropic-version": "2023-06-01" },
+			modelId: "claude-sonnet-4-6",
+			keyHeader: "authorization",
+			keyValue: "Bearer test-key",
+		},
+		{
+			adapter: createMistralPreflightAdapter(1_000),
+			url: "https://api.mistral.ai/v1/models",
+			extraHeaders: undefined,
+			modelId: "mistral-large-latest",
+			keyHeader: "authorization",
+			keyValue: "Bearer test-key",
+		},
+		{
+			adapter: createNvidiaPreflightAdapter(1_000),
+			url: "https://integrate.api.nvidia.com/v1/models",
+			extraHeaders: undefined,
+			modelId: "nvidia/nemotron-3.5-lightning-30b-a3b",
+			keyHeader: "authorization",
+			keyValue: "Bearer test-key",
+		},
+		{
+			adapter: createCerebrasPreflightAdapter(1_000),
+			url: "https://api.cerebras.ai/v1/models",
+			extraHeaders: undefined,
+			modelId: "llama-4-maverick",
+			keyHeader: "authorization",
+			keyValue: "Bearer test-key",
+		},
+	];
+
+	for (const entry of cases) {
+		const snapshot = await entry.adapter.fetch({
+			fetch: async (input, init) => {
+				assert.equal(String(input), entry.url);
+				const headers = new Headers(init?.headers);
+				assert.equal(headers.get(entry.keyHeader), entry.keyValue);
+				for (const [header, value] of Object.entries(entry.extraHeaders ?? {})) {
+					assert.equal(headers.get(header), value);
+				}
+				return new Response(JSON.stringify({ data: [{ id: entry.modelId }] }), { status: 200 });
+			},
+			getApiKey: async () => "test-key",
+			now: () => 9_000,
+			model: { provider: entry.adapter.providerId, id: entry.modelId } as any,
+		});
+		assert.deepEqual(snapshot, {
+			passed: true,
+			checks: ["endpoint", "catalog", "auth"],
+			updatedAt: 9_000,
+			httpStatus: 200,
+		});
+	}
+});
+
+test("catalog preflight supports provider-specific key headers and auth-less checks", async () => {
+	const { createCatalogPreflightAdapter } = await import("../core/catalog-preflight.ts");
+	const adapter = createCatalogPreflightAdapter(
+		{
+			id: "catalog-test",
+			providerId: "test-provider",
+			name: "Test",
+			modelsUrl: "https://example.test/v1/models",
+			keyHeader: "x-api-key",
+			requireAuth: false,
+		},
+		1_000,
+	);
+	const snapshot = await adapter.fetch({
+		fetch: async (input, init) => {
+			assert.equal(String(input), "https://example.test/v1/models");
+			const headers = new Headers(init?.headers);
+			assert.equal(headers.get("x-api-key"), "test-key");
+			return new Response(JSON.stringify({ data: [{ id: "model-a" }] }), { status: 200 });
+		},
+		getApiKey: async () => "test-key",
+		now: () => 21_000,
+		model: { provider: "test-provider", id: "model-a" } as any,
+	});
+	assert.deepEqual(snapshot, {
+		passed: true,
+		checks: ["endpoint", "catalog"],
+		updatedAt: 21_000,
+		httpStatus: 200,
+	});
+});

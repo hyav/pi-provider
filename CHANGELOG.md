@@ -4,6 +4,8 @@ This file is the authoritative user-facing release history for `@hyav/pi-provide
 
 ## Unreleased
 
+- Add first-batch catalog Preflight Adapters for Pi native providers: OpenAI, Anthropic, Mistral, NVIDIA NIM, and Cerebras.
+- Add a shared OpenAI-style catalog preflight helper (`createCatalogPreflightAdapter`).
 - Add Status and Preflight Adapters for Pi native providers: Anthropic (subscription extra usage), OpenRouter (key credits and free tier), Groq (rate-limit headers), xAI (rate-limit headers), and GitHub Copilot (Individual plan quotas).
 - Expose the stored credential type (`oauth` vs `api_key`) to Status Adapters through `getCredentialType()`.
 

@@ -18,6 +18,7 @@ export {
 	defineStatusExtension,
 	defineTunerExtension,
 } from "./adapter-extensions.ts";
+export { createCatalogPreflightAdapter } from "./catalog-preflight.ts";
 export { withDeadline } from "./deadline.ts";
 export { isProviderDataError, ProviderDataError } from "./errors.ts";
 export { createOpenCodeCatalogPreflightAdapter } from "./opencode-preflight.ts";

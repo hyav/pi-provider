@@ -15,6 +15,7 @@
 - 显式诊断：缓存 `/status`、免费 `/status refresh` 和可能计费的 `/status check`
 - 内置 Charm Hyper、DeepSeek、Google Gemini、OpenAI Codex、OpenCode Zen 和 OpenCode Go 集成
 - Status/Preflight 适配覆盖 Pi 原生 Provider：Anthropic、GitHub Copilot、OpenRouter、Groq、xAI
+- 目录 Preflight 适配覆盖 Pi 原生 Provider：OpenAI、Anthropic、Mistral、NVIDIA NIM、Cerebras
 
 ## 安装
 

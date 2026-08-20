@@ -196,9 +196,9 @@ test("a copy of every built-in adapter loads from the public entrypoint", async 
 		console.warn = originalWarn;
 
 		assert.deepEqual(warnings, []);
-		// Built-in adapters (10 preflight + 9 status + 1 provider) plus their copies in the user root;
+		// Built-in adapters (15 preflight + 9 status + 1 provider) plus their copies in the user root;
 		// helper subdirectories are not scanned.
-		assert.equal(pi.registrations.length, 40);
+		assert.equal(pi.registrations.length, 50);
 	} finally {
 		console.warn = originalWarn;
 		await rm(root, { recursive: true, force: true });

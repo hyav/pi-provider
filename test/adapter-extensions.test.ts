@@ -235,12 +235,17 @@ test("the package entrypoint loads every built-in adapter", async () => {
 		assert.deepEqual(
 			registrations.sort((left, right) => `${left.kind}:${left.id}`.localeCompare(`${right.kind}:${right.id}`)),
 			[
+				{ kind: "preflight", id: "anthropic-preflight" },
+				{ kind: "preflight", id: "cerebras-preflight" },
 				{ kind: "preflight", id: "charm-hyper-preflight" },
 				{ kind: "preflight", id: "deepseek-preflight" },
 				{ kind: "preflight", id: "github-copilot-preflight" },
 				{ kind: "preflight", id: "google-preflight" },
 				{ kind: "preflight", id: "groq-preflight" },
+				{ kind: "preflight", id: "mistral-preflight" },
+				{ kind: "preflight", id: "nvidia-preflight" },
 				{ kind: "preflight", id: "openai-codex-preflight" },
+				{ kind: "preflight", id: "openai-preflight" },
 				{ kind: "preflight", id: "opencode-go-preflight" },
 				{ kind: "preflight", id: "opencode-preflight" },
 				{ kind: "preflight", id: "openrouter-preflight" },
