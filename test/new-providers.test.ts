@@ -1,0 +1,211 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { ProviderDataError } from "../core/errors.ts";
+import { createAnthropicStatusAdapter, parseAnthropicUsage } from "../status/anthropic.ts";
+import { createGithubCopilotStatusAdapter, githubCopilotStatusAdapter } from "../status/github-copilot.ts";
+import { groqStatusAdapter } from "../status/groq.ts";
+import { createOpenRouterStatusAdapter, openRouterStatusAdapter } from "../status/openrouter.ts";
+import { createXaiStatusAdapter, xaiStatusAdapter } from "../status/xai.ts";
+
+function statusContext(key: string | undefined, fetch: typeof globalThis.fetch) {
+	return {
+		getApiKey: async () => key,
+		fetch,
+		now: () => 1_700_000_000_000,
+	};
+}
+
+test("parses anthropic subscription usage payloads", () => {
+	const parsed = parseAnthropicUsage({
+		plan: "Ent",
+		subscribedUsage: {
+			session: 12,
+			sessionLimit: 100,
+			weekly: 320,
+			weeklyLimit: 500,
+			extraUsageBalanceUsd: 15,
+		},
+		weeklyResetAt: 1_700_100_000,
+	});
+	assert.equal(parsed.plan, "Ent");
+	assert.deepEqual(
+		parsed.windows.map(({ id, used, limit }) => ({ id, used, limit })),
+		[
+			{ id: "session-usage", used: 12, limit: 100 },
+			{ id: "weekly-usage", used: 320, limit: 500 },
+		],
+	);
+	assert.equal(parsed.resetAt, 1_700_100_000_000);
+	assert.equal(parsed.extraUsageBalanceUsd, 15);
+	const empty = parseAnthropicUsage({});
+	assert.deepEqual(empty.windows, []);
+	assert.equal(empty.plan, undefined);
+});
+
+test("queries anthropic subscription usage with a Bearer token", async () => {
+	const adapter = createAnthropicStatusAdapter(8_000);
+	const snapshot = await adapter.fetch({
+		...statusContext("oauth-token", async (input, init) => {
+			assert.equal(input.toString(), "https://claude.ai/api/usage");
+			const headers = new Headers(init?.headers);
+			assert.equal(headers.get("authorization"), "Bearer oauth-token");
+			assert.equal(headers.get("user-agent"), "@hyav/pi-provider");
+			return new Response(
+				JSON.stringify({
+					plan: "Max",
+					subscribedUsage: { weekly: 20, weeklyLimit: 100 },
+				}),
+				{ status: 200 },
+			);
+		}),
+		getCredentialType: async () => "oauth",
+	});
+	assert.deepEqual(
+		snapshot.entries.map(({ id }) => id),
+		["plan", "weekly-usage"],
+	);
+});
+
+test("github-copilot status routes around missing usage endpoints", async () => {
+	const adapter = createGithubCopilotStatusAdapter(8_000);
+	const snapshot = await adapter.fetch(statusContext("copilot-token", async () => new Response("", { status: 404 })));
+	assert.deepEqual(snapshot.entries, [
+		{ kind: "text", id: "usage", label: "Usage", value: "unavailable for this plan" },
+	]);
+});
+
+test("github-copilot status shows modelCatalog quotas", async () => {
+	const snapshot = await githubCopilotStatusAdapter.fetch(
+		statusContext("copilot-token", async (input, init) => {
+			assert.equal(input.toString(), "https://api.individual.githubcopilot.com/usage");
+			const headers = new Headers(init?.headers);
+			assert.equal(headers.get("authorization"), "Bearer copilot-token");
+			return new Response(
+				JSON.stringify({
+					modelCatalog: {
+						planName: "Pro",
+						usage: {
+							modelQuotas: {
+								"gpt-5.1-codex": {
+									modelCopilotName: "GPT-5.1 Codex",
+									usedRequestsQuantity: 20,
+									allowedRequestsQuantity: 100,
+								},
+							},
+						},
+					},
+				}),
+				{ status: 200 },
+			);
+		}),
+	);
+	assert.deepEqual(snapshot.entries, [
+		{ kind: "text", id: "plan", label: "Plan", value: "Pro" },
+		{
+			kind: "window",
+			id: "quota-gpt-5.1-codex",
+			label: "GPT-5.1 Codex",
+			remainingPercent: 80,
+		},
+	]);
+});
+
+test("groq status reads x-ratelimit headers", async () => {
+	const snapshot = await groqStatusAdapter.fetch(
+		statusContext("groq-key", async (input, init) => {
+			assert.equal(input.toString(), "https://api.groq.com/openai/v1/models");
+			const headers = new Headers(init?.headers);
+			assert.equal(headers.get("authorization"), "Bearer groq-key");
+			return new Response(JSON.stringify({ data: [{ id: "llama-4-maverick" }] }), {
+				status: 200,
+				headers: {
+					"x-ratelimit-limit-requests": "100",
+					"x-ratelimit-remaining-requests": "80",
+					"x-ratelimit-reset-requests": "1d",
+				},
+			});
+		}),
+	);
+	assert.deepEqual(
+		snapshot.entries.map(({ id }) => id),
+		["models", "requests-per-day"],
+	);
+	const requestsEntry = snapshot.entries[1];
+	assert.equal(requestsEntry.kind, "window");
+	if (requestsEntry.kind === "window") {
+		assert.equal(requestsEntry.remainingPercent, 80);
+	}
+});
+
+test("openrouter status reads /auth/key with credits fallback", async () => {
+	const adapter = createOpenRouterStatusAdapter(8_000);
+	const snapshot = await adapter.fetch(
+		statusContext("or-key", async (input: string | URL | Request) => {
+			const urlString = input.toString();
+			if (urlString === "https://openrouter.ai/api/v1/auth/key") {
+				return new Response(
+					JSON.stringify({
+						data: { label: "cli", usage: 25.5, limit: null, is_free_tier: true },
+					}),
+					{ status: 200 },
+				);
+			}
+			if (urlString === "https://openrouter.ai/api/v1/credits") {
+				return new Response(JSON.stringify({ data: { total_credits: 0, total_usage: 0 } }), {
+					status: 200,
+				});
+			}
+			return new Response("not found", { status: 404 });
+		}),
+	);
+	assert.deepEqual(
+		snapshot.entries.map(({ id }) => id),
+		["key", "credits-used", "credits-remaining", "account-tier"],
+	);
+});
+
+test("xai status reads x-ratelimit headers", async () => {
+	const adapter = createXaiStatusAdapter(8_000);
+	const snapshot = await adapter.fetch(
+		statusContext("xai-token", async (input, init) => {
+			assert.equal(input.toString(), "https://api.x.ai/v1/models");
+			const headers = new Headers(init?.headers);
+			assert.equal(headers.get("authorization"), "Bearer xai-token");
+			return new Response("{}", {
+				status: 200,
+				headers: {
+					"x-ratelimit-limit-tokens": "1000",
+					"x-ratelimit-remaining-tokens": "500",
+				},
+			});
+		}),
+	);
+	assert.deepEqual(
+		snapshot.entries.map(({ id }) => id),
+		["tokens-window"],
+	);
+	const tokensEntry = snapshot.entries[0];
+	assert.equal(tokensEntry.kind, "window");
+	if (tokensEntry.kind === "window") {
+		assert.equal(tokensEntry.remainingPercent, 50);
+	}
+});
+
+test("status adapters require credentials and surface HTTP failures", async () => {
+	for (const adapter of [
+		openRouterStatusAdapter,
+		groqStatusAdapter,
+		xaiStatusAdapter,
+		githubCopilotStatusAdapter,
+		createAnthropicStatusAdapter(8_000),
+	]) {
+		await assert.rejects(
+			adapter.fetch(statusContext(undefined, async () => new Response("unused"))),
+			(error: unknown) => error instanceof ProviderDataError && error.code === "auth",
+		);
+	}
+	await assert.rejects(
+		groqStatusAdapter.fetch(statusContext("groq-key", async () => new Response("", { status: 500 }))),
+		(error: unknown) => error instanceof ProviderDataError && error.code === "http500",
+	);
+});

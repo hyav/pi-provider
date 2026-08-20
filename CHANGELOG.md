@@ -2,6 +2,11 @@
 
 This file is the authoritative user-facing release history for `@hyav/pi-provider`.
 
+## Unreleased
+
+- Add Status and Preflight Adapters for Pi native providers: Anthropic (subscription extra usage), OpenRouter (key credits and free tier), Groq (rate-limit headers), xAI (rate-limit headers), and GitHub Copilot (Individual plan quotas).
+- Expose the stored credential type (`oauth` vs `api_key`) to Status Adapters through `getCredentialType()`.
+
 ## 0.1.3 - 2026-08-17
 
 - Discover user Adapter files under `<agent-dir>/extensions/pi-provider/` in addition to built-ins; user files load last and override same-ID built-ins.

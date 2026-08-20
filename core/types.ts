@@ -147,6 +147,8 @@ export interface StatusContext {
 	getApiKey: () => Promise<string | undefined>;
 	/** Optional non-secret credential metadata for provider-specific account labels. */
 	getCredentialMetadata?: () => unknown;
+	/** Optional non-secret credential type ("oauth" vs "api_key") for providers with dual auth modes. */
+	getCredentialType?: () => Promise<string | undefined>;
 	signal?: AbortSignal;
 	now: () => number;
 }

@@ -14,6 +14,7 @@ A provider extension toolkit for [Pi](https://pi.dev). It registers LLM provider
 - Provider-first pricing metadata with optional OpenRouter completion and quality indicators
 - Explicit diagnostics: cached `/status`, free `/status refresh`, and potentially billable `/status check`
 - Built-in integrations for Charm Hyper, DeepSeek, Google Gemini, OpenAI Codex, OpenCode Zen, and OpenCode Go
+- Status/preflight adapters for the native Pi providers Anthropic, GitHub Copilot, OpenRouter, Groq, and xAI
 
 ## Install
 

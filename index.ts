@@ -74,6 +74,7 @@ export type {
 export { getPreflightKey, normalizePreflightSnapshot, PreflightManager } from "./core/preflight-manager.ts";
 export { applyPricingAdjustment, resolvePricingDetails } from "./core/pricing-adjustments.ts";
 export { normalizeProviderModels } from "./core/provider-registration.ts";
+export type { RateLimitWindow } from "./core/ratelimit-headers.ts";
 export { parseRetryAfter } from "./core/retry-after.ts";
 export type { StatusDiagnostics, StatusErrorState } from "./core/status-manager.ts";
 export { normalizeStatusSnapshot, StatusManager } from "./core/status-manager.ts";

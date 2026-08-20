@@ -261,3 +261,79 @@ test("OpenAI Codex preflight rejects a credential without an account identity be
 	);
 	assert.equal(requests, 0);
 });
+
+test("new provider preflights check their authenticated catalogs", async () => {
+	const { createGroqPreflightAdapter } = await import("../preflight/groq.ts");
+	const { createXaiPreflightAdapter } = await import("../preflight/xai.ts");
+	const { createGithubCopilotPreflightAdapter } = await import("../preflight/github-copilot.ts");
+	const { createOpenRouterPreflightAdapter } = await import("../preflight/openrouter.ts");
+
+	const cases = [
+		{
+			name: "Groq",
+			adapter: createGroqPreflightAdapter(1_000),
+			url: "https://api.groq.com/openai/v1/models",
+			body: { data: [{ id: "llama-4-maverick" }] },
+			model: "llama-4-maverick",
+			checks: ["endpoint", "auth", "catalog"],
+		},
+		{
+			name: "xAI",
+			adapter: createXaiPreflightAdapter(1_000),
+			url: "https://api.x.ai/v1/models",
+			body: { data: [{ id: "grok-4.6" }] },
+			model: "grok-4.6",
+			checks: ["endpoint", "catalog", "auth"],
+		},
+		{
+			name: "GitHub Copilot",
+			adapter: createGithubCopilotPreflightAdapter(1_000),
+			url: "https://api.individual.githubcopilot.com/models",
+			body: { data: [{ id: "gpt-5.6-sol" }] },
+			model: "gpt-5.6-sol",
+			checks: ["endpoint", "catalog", "auth"],
+		},
+	];
+
+	for (const entry of cases) {
+		const snapshot = await entry.adapter.fetch({
+			fetch: async (input, init) => {
+				assert.equal(String(input), entry.url);
+				assert.equal(new Headers(init?.headers).get("authorization"), "Bearer test-key");
+				return new Response(JSON.stringify(entry.body), { status: 200 });
+			},
+			getApiKey: async () => "test-key",
+			now: () => 3_000,
+			model: { provider: entry.adapter.providerId, id: entry.model } as any,
+		});
+		assert.deepEqual(snapshot, {
+			passed: true,
+			checks: entry.checks,
+			updatedAt: 3_000,
+			httpStatus: 200,
+		});
+	}
+
+	const openRouterAdapter = createOpenRouterPreflightAdapter(1_000);
+	const openRouterSnapshot = await openRouterAdapter.fetch({
+		fetch: async (input, init) => {
+			const url = String(input);
+			if (url === "https://openrouter.ai/api/v1/models") {
+				return new Response(JSON.stringify({ data: [{ id: "openai/gpt-5.6" }] }), { status: 200 });
+			}
+			assert.equal(url, "https://openrouter.ai/api/v1/auth/key");
+			assert.equal(new Headers(init?.headers).get("authorization"), "Bearer test-key");
+			return new Response(JSON.stringify({ data: { label: "cli", usage: 1, limit: null, is_free_tier: true } }), {
+				status: 200,
+			});
+		},
+		getApiKey: async () => "test-key",
+		now: () => 4_000,
+		model: { provider: "openrouter", id: "openai/gpt-5.6" } as any,
+	});
+	assert.deepEqual(openRouterSnapshot, {
+		passed: true,
+		checks: ["endpoint", "catalog", "auth"],
+		updatedAt: 4_000,
+	});
+});

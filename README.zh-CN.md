@@ -14,6 +14,7 @@
 - 优先采用 Provider 价格元数据，并可由 OpenRouter 补全价格和质量指标
 - 显式诊断：缓存 `/status`、免费 `/status refresh` 和可能计费的 `/status check`
 - 内置 Charm Hyper、DeepSeek、Google Gemini、OpenAI Codex、OpenCode Zen 和 OpenCode Go 集成
+- Status/Preflight 适配覆盖 Pi 原生 Provider：Anthropic、GitHub Copilot、OpenRouter、Groq、xAI
 
 ## 安装
 

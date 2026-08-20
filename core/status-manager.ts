@@ -226,7 +226,23 @@ export class StatusManager {
 					adapter.fetch({
 						fetch: this.fetchFn,
 						getApiKey: () => ctx.modelRegistry.getApiKeyForProvider(adapter.providerId),
-						...(ctx.getCredentialMetadata ? { getCredentialMetadata: ctx.getCredentialMetadata } : {}),
+						...(ctx.getCredentialMetadata === undefined
+							? {}
+							: {
+									getCredentialMetadata: ctx.getCredentialMetadata,
+									getCredentialType: async () => {
+										try {
+											const metadata = ctx.getCredentialMetadata?.();
+											if (metadata !== null && typeof metadata === "object" && "type" in metadata) {
+												const value = (metadata as { type?: unknown }).type;
+												return typeof value === "string" ? value : undefined;
+											}
+										} catch {
+											// Credential metadata must never break status rendering.
+										}
+										return undefined;
+									},
+								}),
 						now: this.now,
 						signal,
 					}),
