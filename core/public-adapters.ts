@@ -22,7 +22,6 @@ export { createCatalogPreflightAdapter } from "./catalog-preflight.ts";
 export { withDeadline } from "./deadline.ts";
 export { isProviderDataError, ProviderDataError } from "./errors.ts";
 export { createOpenCodeCatalogPreflightAdapter } from "./opencode-preflight.ts";
-export { VERCEL_PROVIDER_ID } from "./vercel-constants.ts";
 export type {
 	PreflightAdapter,
 	PreflightContextLike,

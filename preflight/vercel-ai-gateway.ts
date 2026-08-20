@@ -1,6 +1,6 @@
 import type { PreflightAdapter, PreflightSnapshot } from "@hyav/pi-provider";
 import { definePreflightExtension, ProviderDataError, parseRetryAfter } from "@hyav/pi-provider";
-import { VERCEL_PROVIDER_ID } from "../core/vercel-constants.ts";
+import { VERCEL_PROVIDER_ID } from "../status/vercel-ai-gateway/constants.ts";
 
 export const VERCEL_MODELS_URL = "https://ai-gateway.vercel.sh/v1/models";
 

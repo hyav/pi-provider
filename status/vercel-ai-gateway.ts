@@ -1,6 +1,6 @@
 import type { StatusAdapter, StatusSnapshot } from "@hyav/pi-provider";
 import { defineStatusExtension, ProviderDataError, parseRetryAfter } from "@hyav/pi-provider";
-import { VERCEL_PROVIDER_ID } from "../core/vercel-constants.ts";
+import { VERCEL_PROVIDER_ID } from "./vercel-ai-gateway/constants.ts";
 
 export const VERCEL_CREDITS_URL = "https://ai-gateway.vercel.sh/v1/credits";
 
