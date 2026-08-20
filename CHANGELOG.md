@@ -2,7 +2,7 @@
 
 This file is the authoritative user-facing release history for `@hyav/pi-provider`.
 
-## Unreleased
+## 0.1.4 - 2026-08-21
 
 - Add Status and Preflight Adapters for the Vercel AI Gateway (auth, model catalog, and credits).
 - Add Status and Preflight Adapters for Pi native providers Moonshot (Kimi) international and China platforms, and Hugging Face router (plan/credits via `whoami-v2`).
@@ -14,6 +14,7 @@ This file is the authoritative user-facing release history for `@hyav/pi-provide
 - Route Anthropic credentials by type: API keys (`sk-ant-api...`) use `x-api-key` for preflight catalog checks and default status without sending keys to subscription endpoints; OAuth tokens (`sk-ant-oat...`) query subscription usage and send `Authorization: Bearer`.
 - Parse compound duration strings (`2m59.56s`, `7.66s`, `250ms`, `1d`, `1h30m`) and bare seconds in rate-limit reset headers for Groq and xAI status adapters.
 - Expose the stored credential type (`oauth` vs `api_key`) to Status and Preflight Adapters through `getCredentialType()`.
+- Align Charm Hyper status adapter cache TTL with standard status adapters (60s).
 
 ## 0.1.3 - 2026-08-17
 
