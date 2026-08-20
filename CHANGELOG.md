@@ -4,6 +4,8 @@ This file is the authoritative user-facing release history for `@hyav/pi-provide
 
 ## Unreleased
 
+- Add Status and Preflight Adapters for Pi native providers Moonshot (Kimi) international and China platforms, and Hugging Face router (plan/credits via `whoami-v2`).
+- Skip MiniMax Token Plan status: the documented `/coding_plan/remains` endpoint requires a web session cookie, not the API key, and its field semantics are known to be unreliable (see MiniMax-M2 issues #88 and #99).
 - Add first-batch catalog Preflight Adapters for Pi native providers: OpenAI, Anthropic, Mistral, NVIDIA NIM, and Cerebras.
 - Add a shared OpenAI-style catalog preflight helper (`createCatalogPreflightAdapter`).
 - Add Status and Preflight Adapters for Pi native providers: Anthropic (subscription extra usage), OpenRouter (key credits and free tier), Groq (rate-limit headers), xAI (rate-limit headers), and GitHub Copilot (Individual plan quotas).

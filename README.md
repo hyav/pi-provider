@@ -15,6 +15,7 @@ A provider extension toolkit for [Pi](https://pi.dev). It registers LLM provider
 - Explicit diagnostics: cached `/status`, free `/status refresh`, and potentially billable `/status check`
 - Built-in integrations for Charm Hyper, DeepSeek, Google Gemini, OpenAI Codex, OpenCode Zen, and OpenCode Go
 - Status/preflight adapters for the native Pi providers Anthropic, GitHub Copilot, OpenRouter, Groq, and xAI
+- Status/preflight adapters for Moonshot (Kimi) international and China platforms, and Hugging Face plan/credits
 - Catalog preflight adapters for the native Pi providers OpenAI, Anthropic, Mistral, NVIDIA NIM, and Cerebras
 
 ## Install

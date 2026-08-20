@@ -209,3 +209,64 @@ test("status adapters require credentials and surface HTTP failures", async () =
 		(error: unknown) => error instanceof ProviderDataError && error.code === "http500",
 	);
 });
+
+test("parses moonshot balance payloads", async () => {
+	const { parseMoonshotBalance } = await import("../status/moonshotai.ts");
+	assert.deepEqual(
+		parseMoonshotBalance({
+			code: 0,
+			data: { available_balance: 49.58, voucher_balance: 46.58, cash_balance: 3 },
+			scode: "0x0",
+			status: true,
+		}),
+		{ available: 49.58, voucher: 46.58, cash: 3 },
+	);
+	assert.throws(
+		() => parseMoonshotBalance({ code: 0, data: { available_balance: "nan" } }),
+		/returned an invalid balance response/,
+	);
+});
+
+test("moonshot status reads balance for both platforms", async () => {
+	const { moonshotaiStatusAdapter } = await import("../status/moonshotai.ts");
+	const { moonshotaiCnStatusAdapter } = await import("../status/moonshotai-cn.ts");
+	for (const [adapter, expectedUrl] of [
+		[moonshotaiStatusAdapter, "https://api.moonshot.ai/v1/users/me/balance"],
+		[moonshotaiCnStatusAdapter, "https://api.moonshot.cn/v1/users/me/balance"],
+	] as const) {
+		const snapshot = await adapter.fetch({
+			...statusContext("moonshot-key", async (input, init) => {
+				assert.equal(String(input), expectedUrl);
+				assert.equal(new Headers(init?.headers).get("authorization"), "Bearer moonshot-key");
+				return new Response(
+					JSON.stringify({
+						code: 0,
+						data: { available_balance: 12.5, voucher_balance: 10, cash_balance: 2.5 },
+					}),
+					{ status: 200 },
+				);
+			}),
+		});
+		assert.deepEqual(
+			snapshot.entries.map(({ id }) => id),
+			["available-balance", "voucher-balance", "cash-balance"],
+		);
+	}
+});
+
+test("hugging face status reports plan and credits", async () => {
+	const { huggingFaceStatusAdapter } = await import("../status/huggingface.ts");
+	const snapshot = await huggingFaceStatusAdapter.fetch(
+		statusContext("hf-token", async (input, init) => {
+			assert.equal(String(input), "https://huggingface.co/api/whoami-v2");
+			assert.equal(new Headers(init?.headers).get("authorization"), "Bearer hf-token");
+			return new Response(JSON.stringify({ type: "user", plan: "PRO", credits: 1.24 }), {
+				status: 200,
+			});
+		}),
+	);
+	assert.deepEqual(snapshot.entries, [
+		{ kind: "text", id: "plan", label: "Plan", value: "PRO" },
+		{ kind: "amount", id: "credits", label: "Credits", value: 1.24, unit: "USD" },
+	]);
+});

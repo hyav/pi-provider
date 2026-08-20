@@ -17,6 +17,7 @@ export {
 	defineStatusExtension,
 	defineTunerExtension,
 } from "./core/adapter-extensions.ts";
+export { createCatalogPreflightAdapter } from "./core/catalog-preflight.ts";
 export { withDeadline } from "./core/deadline.ts";
 export type { ProviderDataErrorLike } from "./core/errors.ts";
 export { isProviderDataError, ProviderDataError } from "./core/errors.ts";
@@ -73,7 +74,6 @@ export type {
 } from "./core/preflight-manager.ts";
 export { getPreflightKey, normalizePreflightSnapshot, PreflightManager } from "./core/preflight-manager.ts";
 export { applyPricingAdjustment, resolvePricingDetails } from "./core/pricing-adjustments.ts";
-export { createCatalogPreflightAdapter } from "./core/catalog-preflight.ts";
 export { normalizeProviderModels } from "./core/provider-registration.ts";
 export type { RateLimitWindow } from "./core/ratelimit-headers.ts";
 export { parseRetryAfter } from "./core/retry-after.ts";

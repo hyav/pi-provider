@@ -443,3 +443,32 @@ test("catalog preflight supports provider-specific key headers and auth-less che
 		httpStatus: 200,
 	});
 });
+
+test("moonshot and hugging face preflights check their catalogs", async () => {
+	const { createMoonshotaiPreflightAdapter } = await import("../preflight/moonshotai.ts");
+	const { createMoonshotaiCnPreflightAdapter } = await import("../preflight/moonshotai-cn.ts");
+	const { createHuggingFacePreflightAdapter } = await import("../preflight/huggingface.ts");
+
+	for (const [adapter, url, modelId] of [
+		[createMoonshotaiPreflightAdapter(1_000), "https://api.moonshot.ai/v1/models", "kimi-k2.6"],
+		[createMoonshotaiCnPreflightAdapter(1_000), "https://api.moonshot.cn/v1/models", "kimi-k2.6"],
+		[createHuggingFacePreflightAdapter(1_000), "https://router.huggingface.co/v1/models", "moonshotai/Kimi-K2.5"],
+	] as const) {
+		const snapshot = await adapter.fetch({
+			fetch: async (input: string | URL | Request, init?: RequestInit) => {
+				assert.equal(String(input), url);
+				assert.equal(new Headers(init?.headers).get("authorization"), "Bearer test-key");
+				return new Response(JSON.stringify({ data: [{ id: modelId }] }), { status: 200 });
+			},
+			getApiKey: async () => "test-key",
+			now: () => 30_000,
+			model: { provider: adapter.providerId, id: modelId } as any,
+		});
+		assert.deepEqual(snapshot, {
+			passed: true,
+			checks: ["endpoint", "catalog", "auth"],
+			updatedAt: 30_000,
+			httpStatus: 200,
+		});
+	}
+});
