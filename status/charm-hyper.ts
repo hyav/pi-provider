@@ -21,7 +21,7 @@ export const hyperStatusAdapter: StatusAdapter = {
 	id: "charm-hyper-status",
 	providerId: "charm-hyper",
 	name: "Charm Hyper",
-	cacheTtlMs: 30_000,
+	cacheTtlMs: 60_000,
 	requestTimeoutMs: 8_000,
 	async fetch(context): Promise<StatusSnapshot> {
 		const key = await context.getApiKey();
