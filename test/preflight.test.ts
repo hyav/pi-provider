@@ -472,3 +472,39 @@ test("moonshot and hugging face preflights check their catalogs", async () => {
 		});
 	}
 });
+
+test("Vercel AI Gateway preflight checks a mixed-type catalog", async () => {
+	const { parseVercelModelIds, vercelAIGatewayPreflightAdapter } = await import(
+		"../preflight/vercel-ai-gateway.ts"
+	);
+	assert.deepEqual(
+		[...parseVercelModelIds({
+			data: [
+				{ id: "openai/gpt-5.6", type: "language" },
+				{ id: "somewhere/embedding-model", type: "embedding" },
+				{ id: "anthropic/claude-sonnet-4-6" },
+			],
+		})],
+		["openai/gpt-5.6", "anthropic/claude-sonnet-4-6"],
+	);
+	assert.throws(() => parseVercelModelIds({ data: [] }), /empty catalog/);
+
+	const snapshot = await vercelAIGatewayPreflightAdapter.fetch({
+		fetch: async (input) => {
+			assert.equal(String(input), "https://ai-gateway.vercel.sh/v1/models");
+			return new Response(
+				JSON.stringify({ data: [{ id: "openai/gpt-5.6", type: "language" }] }),
+				{ status: 200 },
+			);
+		},
+		getApiKey: async () => "vercel-key",
+		now: () => 99_000,
+		model: { provider: "vercel-ai-gateway", id: "openai/gpt-5.6" } as any,
+	});
+	assert.deepEqual(snapshot, {
+		passed: true,
+		checks: ["endpoint", "auth", "catalog"],
+		updatedAt: 99_000,
+		httpStatus: 200,
+	});
+});

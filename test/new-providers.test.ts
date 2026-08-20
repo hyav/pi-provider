@@ -270,3 +270,31 @@ test("hugging face status reports plan and credits", async () => {
 		{ kind: "amount", id: "credits", label: "Credits", value: 1.24, unit: "USD" },
 	]);
 });
+
+test("parses Vercel AI Gateway credits", async () => {
+	const { parseVercelCredits } = await import("../status/vercel-ai-gateway.ts");
+	assert.deepEqual(parseVercelCredits({ balance: 1.25, total_used: 0.75 }), { balance: 1.25, totalUsed: 0.75 });
+	assert.throws(() => parseVercelCredits({ balance: 1.25 }), /invalid credits response/);
+	assert.throws(() => parseVercelCredits({ balance: "nope", total_used: 0 }), /invalid credits response/);
+});
+
+test("Vercel AI Gateway status reads credits with a Bearer key", async () => {
+	const { vercelAIGatewayStatusAdapter } = await import("../status/vercel-ai-gateway.ts");
+	const snapshot = await vercelAIGatewayStatusAdapter.fetch(
+		statusContext("vercel-key", async (input, init) => {
+			assert.equal(String(input), "https://ai-gateway.vercel.sh/v1/credits");
+			assert.equal(new Headers(init?.headers).get("authorization"), "Bearer vercel-key");
+			return new Response(JSON.stringify({ balance: 0.5, total_used: 4.5 }), { status: 200 });
+		}),
+	);
+	assert.deepEqual(snapshot.entries, [
+		{ kind: "amount", id: "balance", label: "Balance", value: 0.5, unit: "USD" },
+		{ kind: "amount", id: "total-used", label: "Total Used", value: 4.5, unit: "USD" },
+	]);
+	await assert.rejects(
+		vercelAIGatewayStatusAdapter.fetch(
+			statusContext("vercel-key", async () => new Response("", { status: 401 })),
+		),
+		(error: unknown) => error instanceof ProviderDataError && error.code === "auth",
+	);
+});

@@ -78,6 +78,7 @@ export { normalizeProviderModels } from "./core/provider-registration.ts";
 export type { RateLimitWindow } from "./core/ratelimit-headers.ts";
 export { parseRetryAfter } from "./core/retry-after.ts";
 export type { StatusDiagnostics, StatusErrorState } from "./core/status-manager.ts";
+export { VERCEL_PROVIDER_ID } from "./core/vercel-constants.ts";
 export { normalizeStatusSnapshot, StatusManager } from "./core/status-manager.ts";
 export { applyTunerAdapters, sortTunerAdapters } from "./core/tuner-manager.ts";
 export type {

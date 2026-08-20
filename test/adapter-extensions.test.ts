@@ -252,6 +252,7 @@ test("the package entrypoint loads every built-in adapter", async () => {
 				{ kind: "preflight", id: "opencode-go-preflight" },
 				{ kind: "preflight", id: "opencode-preflight" },
 				{ kind: "preflight", id: "openrouter-preflight" },
+				{ kind: "preflight", id: "vercel-ai-gateway-preflight" },
 				{ kind: "preflight", id: "xai-preflight" },
 				{ kind: "provider", id: "charm-hyper" },
 				{ kind: "status", id: "anthropic-status" },
@@ -265,6 +266,7 @@ test("the package entrypoint loads every built-in adapter", async () => {
 				{ kind: "status", id: "openai-codex-status" },
 				{ kind: "status", id: "opencode-go-status" },
 				{ kind: "status", id: "openrouter-status" },
+				{ kind: "status", id: "vercel-ai-gateway-status" },
 				{ kind: "status", id: "xai-status" },
 			],
 		);
