@@ -31,6 +31,7 @@
 			"status/**/*.ts",
 			"tuners/**/*.ts",
 			"test/**/*.ts",
+			"examples/**/*.ts",
 			"scripts/**/*.mjs",
 			"index.ts"
 		]

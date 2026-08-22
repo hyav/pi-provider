@@ -68,7 +68,7 @@ Built-in Adapters ship inside the package and are always discovered. User Adapte
 ```
 
 
-Add, remove, or modify files there, then run `/reload` to rediscover them without touching the package; edits to existing files are re-read from disk. User Adapters load after built-ins, so a same-ID file overrides the built-in Adapter (the Host keeps the latest registration and warns). `createPiProviderExtension({ adapterRoot })` replaces the default user directory with a custom root; built-ins are always scanned. The built-in Adapters under the package's `providers/`, `status/`, and `preflight/` are reference templates with this exact shape — copy one and customize it (Charm Hyper and `preflight/openai-codex.ts` also use package-private helpers).
+Add, remove, or modify files there, then run `/reload` to rediscover them without touching the package; edits to existing files are re-read from disk. User Adapters load after built-ins, so a same-ID file overrides the built-in Adapter (the Host keeps the latest registration and warns). `createPiProviderExtension({ adapterRoot })` replaces the default user directory with a custom root; built-ins are always scanned. The built-in Adapters under the package's `providers/`, `status/`, and `preflight/` are reference templates with this exact shape — copy one and customize it (Charm Hyper and `preflight/openai-codex.ts` also use package-private helpers). A complete non-built-in Command Code reference is available in [`examples/command-code`](examples/command-code/).
 
 Adapter files import helpers and types from `@hyav/pi-provider` (aliased inside the loader):
 

@@ -68,7 +68,7 @@ pi install npm:@hyav/pi-provider
 ```
 
 
-在目录中增删或修改文件后执行 `/reload` 即可重新发现，无需改动包；对现有文件的修改会重新从磁盘读取。用户 Adapter 在内置之后加载，因此同 ID 的用户文件会覆盖内置 Adapter（Host 保留最新注册并发出警告）。`createPiProviderExtension({ adapterRoot })` 用自定义根替换默认用户目录；内置目录始终被扫描。包内 `providers/`、`status/`、`preflight/` 下的内置 Adapter 就是采用这种写法的参考模板——复制一份改改即可（Charm Hyper 与 `preflight/openai-codex.ts` 还依赖包内私有辅助文件）。
+在目录中增删或修改文件后执行 `/reload` 即可重新发现，无需改动包；对现有文件的修改会重新从磁盘读取。用户 Adapter 在内置之后加载，因此同 ID 的用户文件会覆盖内置 Adapter（Host 保留最新注册并发出警告）。`createPiProviderExtension({ adapterRoot })` 用自定义根替换默认用户目录；内置目录始终被扫描。包内 `providers/`、`status/`、`preflight/` 下的内置 Adapter 就是采用这种写法的参考模板——复制一份改改即可（Charm Hyper 与 `preflight/openai-codex.ts` 还依赖包内私有辅助文件）。完整且不会被默认加载的 Command Code 参考实现见 [`examples/command-code`](examples/command-code/)。
 
 Adapter 文件从 `@hyav/pi-provider` 导入 helper 和类型（加载器内部做了别名映射）：
 

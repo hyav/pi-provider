@@ -11,5 +11,5 @@
     "rewriteRelativeImportExtensions": true,
     "noEmit": true
   },
-  "include": ["index.ts", "core/**/*.ts", "providers/**/*.ts", "preflight/**/*.ts", "status/**/*.ts", "test/**/*.ts", "tuners/**/*.ts"]
+  "include": ["index.ts", "core/**/*.ts", "providers/**/*.ts", "preflight/**/*.ts", "status/**/*.ts", "test/**/*.ts", "tuners/**/*.ts", "examples/**/*.ts"]
 }
