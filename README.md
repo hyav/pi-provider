@@ -45,6 +45,8 @@ pi install npm:@hyav/pi-provider
 
 Use `/status refresh` for free endpoint, authentication, catalog, and account checks. Use `/status check` only when you explicitly accept a real model request and possible usage charges.
 
+A dynamic Provider whose API key references environment variables keeps its cached or fallback model catalog and skips network catalog refreshes until those variables or a stored credential are available. This prevents unconfigured Providers from surfacing model-refresh warnings.
+
 ## Common configuration
 
 | Name | Required | Default | Effect |

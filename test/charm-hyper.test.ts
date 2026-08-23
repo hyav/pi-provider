@@ -380,8 +380,10 @@ test("preserves a failed catalog diagnostic through Pi's fallback refresh", asyn
 	const refreshModels = registered.refreshModels;
 	assert.ok(refreshModels);
 
-	await assert.rejects(refreshModels(refreshContext({ allowNetwork: true })));
-	await refreshModels(refreshContext({ allowNetwork: true }));
+	await assert.rejects(
+		refreshModels(refreshContext({ allowNetwork: true, credential: { type: "api_key", key: "test-key" } })),
+	);
+	await refreshModels(refreshContext({ allowNetwork: true, credential: { type: "api_key", key: "test-key" } }));
 
 	assert.deepEqual(
 		adapter.provider.models.map(({ id }) => id),

@@ -2,6 +2,10 @@
 
 This file is the authoritative user-facing release history for `@hyav/pi-provider`.
 
+## Unreleased
+
+- Skip network model-catalog refreshes for Providers whose environment-backed API key is not configured and which have no resolved stored credential, retaining cached models without Pi refresh warnings.
+
 ## 0.1.4 - 2026-08-21
 
 - Add Status and Preflight Adapters for the Vercel AI Gateway (auth, model catalog, and credits).

@@ -45,6 +45,8 @@ pi install npm:@hyav/pi-provider
 
 使用 `/status refresh` 执行免费的端点、鉴权、目录和账户检查。只有明确接受一次真实模型请求及其可能产生的用量费用时，才使用 `/status check`。
 
+动态 Provider 的 API Key 引用环境变量时，如果这些变量和已存储凭据均未配置，将保留缓存或回退模型目录并跳过网络刷新，避免未配置的 Provider 产生模型目录刷新警告。
+
 ## 常用配置
 
 | 名称 | 必需 | 默认值 | 作用 |

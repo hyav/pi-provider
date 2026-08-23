@@ -177,6 +177,50 @@ function getErrorCode(error: unknown): string {
 	return "fetch";
 }
 
+const ENVIRONMENT_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
+const ENVIRONMENT_NAME_PREFIX = /^[A-Za-z_][A-Za-z0-9_]*/;
+
+/** Match Pi's `$NAME` / `${NAME}` interpolation without executing API-key commands. */
+function getEnvironmentReferences(value: string): string[] {
+	if (value.startsWith("!")) return [];
+	const names = new Set<string>();
+	let index = 0;
+	while (index < value.length) {
+		const dollarIndex = value.indexOf("$", index);
+		if (dollarIndex < 0) break;
+		const next = value[dollarIndex + 1];
+		if (next === "$" || next === "!") {
+			index = dollarIndex + 2;
+			continue;
+		}
+		if (next === "{") {
+			const endIndex = value.indexOf("}", dollarIndex + 2);
+			if (endIndex < 0) {
+				index = dollarIndex + 1;
+				continue;
+			}
+			const name = value.slice(dollarIndex + 2, endIndex);
+			if (ENVIRONMENT_NAME.test(name)) names.add(name);
+			index = endIndex + 1;
+			continue;
+		}
+		const match = value.slice(dollarIndex + 1).match(ENVIRONMENT_NAME_PREFIX);
+		if (match) {
+			names.add(match[0]);
+			index = dollarIndex + 1 + match[0].length;
+		} else {
+			index = dollarIndex + 1;
+		}
+	}
+	return [...names];
+}
+
+function lacksCatalogRefreshCredential(apiKey: string, context: ProviderRefreshContext): boolean {
+	if (context.allowNetwork !== true || context.credential !== undefined) return false;
+	const environmentNames = getEnvironmentReferences(apiKey);
+	return environmentNames.length > 0 && environmentNames.some((name) => !process.env[name]);
+}
+
 /**
  * Register a normalized Provider before the Host has assembled its final
  * registry. The original drafts remain attached to the adapter so a Host in a
@@ -206,6 +250,12 @@ export function prepareProviderRegistration(
 	const registeredProvider: ProviderConfig = { ...providerMetadata, models };
 	if (originalRefresh) {
 		registeredProvider.refreshModels = async (options: ProviderRefreshContext) => {
+			// Pi may ask every dynamic Provider to refresh. Keep the current catalog
+			// when this Provider's environment-backed key is absent instead of
+			// attempting an unauthenticated request that becomes a global refresh error.
+			if (lacksCatalogRefreshCredential(adapter.provider.apiKey, options)) {
+				return [...registration.normalizedModels];
+			}
 			try {
 				const refreshedModels = await originalRefresh(options);
 				const resolved = resolveModelRegistration(adapter, runtime, refreshedModels, officialPricing);

@@ -258,6 +258,67 @@ test("refreshes the pricing sidecar when a dynamic catalog changes", async () =>
 	assert.equal(adapter.registration?.modelMetadata?.["refreshed-model"]?.quality?.[0]?.category, "intelligence");
 });
 
+test("skips a dynamic catalog network refresh when its API-key environment is absent", async () => {
+	const environmentName = "PI_PROVIDER_UNCONFIGURED_CATALOG_KEY";
+	const previous = process.env[environmentName];
+	delete process.env[environmentName];
+	try {
+		const adapter = providerAdapter();
+		adapter.provider.apiKey = `\${${environmentName}}`;
+		let refreshCalls = 0;
+		adapter.provider.refreshModels = async () => {
+			refreshCalls++;
+			throw new Error("unauthenticated catalog request");
+		};
+		const registered = prepareProviderRegistration(adapter, getDefaultPiProviderDependencies());
+
+		const models = await registered.refreshModels?.({ allowNetwork: true } as any);
+
+		assert.equal(refreshCalls, 0);
+		assert.deepEqual(
+			models?.map(({ id }) => id),
+			["model-alpha"],
+		);
+		assert.equal(adapter.catalog?.lastError, undefined);
+	} finally {
+		if (previous === undefined) delete process.env[environmentName];
+		else process.env[environmentName] = previous;
+	}
+});
+
+test("allows a dynamic catalog refresh with an environment or stored credential", async () => {
+	const environmentName = "PI_PROVIDER_CONFIGURED_CATALOG_KEY";
+	const previous = process.env[environmentName];
+	try {
+		const adapter = providerAdapter();
+		adapter.provider.apiKey = `$${environmentName}`;
+		let refreshCalls = 0;
+		adapter.provider.refreshModels = async () => [{ id: `refreshed-${++refreshCalls}` }];
+		const registered = prepareProviderRegistration(adapter, getDefaultPiProviderDependencies());
+
+		process.env[environmentName] = "test-key";
+		const environmentModels = await registered.refreshModels?.({ allowNetwork: true } as any);
+		delete process.env[environmentName];
+		const credentialModels = await registered.refreshModels?.({
+			allowNetwork: true,
+			credential: { type: "api_key", key: "stored-key" },
+		} as any);
+
+		assert.equal(refreshCalls, 2);
+		assert.deepEqual(
+			environmentModels?.map(({ id }) => id),
+			["refreshed-1"],
+		);
+		assert.deepEqual(
+			credentialModels?.map(({ id }) => id),
+			["refreshed-2"],
+		);
+	} finally {
+		if (previous === undefined) delete process.env[environmentName];
+		else process.env[environmentName] = previous;
+	}
+});
+
 test("registers a discounted reference price and keeps pricing provenance", () => {
 	const adapter = providerAdapter();
 	const registered = prepareProviderRegistration(adapter, getDefaultPiProviderDependencies(), {
