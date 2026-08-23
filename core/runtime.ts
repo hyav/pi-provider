@@ -358,6 +358,19 @@ export function installPiProviderRuntime(
 			const refreshChecks: Array<Promise<unknown>> = [];
 			if (status) refreshChecks.push(statusManager.update(statusContext, { force: true }));
 			if (preflight) refreshChecks.push(preflightManager.update(preflightContext, { force: true }));
+			if (typeof ctx.modelRegistry?.refresh === "function") {
+				refreshChecks.push(
+					Promise.resolve()
+						.then(() =>
+							ctx.modelRegistry.refresh({
+								force: true,
+								allowNetwork: true,
+								providers: [model.provider],
+							} as any),
+						)
+						.catch(() => undefined),
+				);
+			}
 
 			let liveCheck: Promise<LiveCheckResult | undefined> = Promise.resolve(undefined);
 			if (mode === "check") {

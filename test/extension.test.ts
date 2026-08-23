@@ -2058,3 +2058,94 @@ test("programmatic defaults keep the agent-dir pricing cache path", () => {
 		else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
 	}
 });
+
+test("refreshes the model catalog on /status refresh and reflects updated models", async () => {
+	const commands: Record<string, any> = {};
+	let refreshOptions: any;
+	let refreshCalls = 0;
+	const extension = createPiProviderRuntime(
+		async () => ({
+			providers: [
+				{
+					id: "dynamic-catalog-provider",
+					provider: {
+						name: "Dynamic Catalog Provider",
+						baseUrl: "https://example.com/v1",
+						apiKey: "$DYNAMIC_PROVIDER_KEY",
+						api: "openai-completions",
+						models: [{ id: "initial-model" }],
+						refreshModels: async () => [{ id: "refreshed-model-1" }, { id: "refreshed-model-2" }],
+					},
+				},
+			],
+		}),
+		{ enableOfficialPricingFallback: false },
+	);
+	const registrations: Array<{ id: string; config: any }> = [];
+	await extension({
+		registerProvider(id: string, config: any) {
+			registrations.push({ id, config });
+		},
+		on() {},
+		registerCommand(name: string, config: any) {
+			commands[name] = config;
+		},
+	} as any);
+
+	const notifications: string[] = [];
+	const registered = registrations[0]!.config;
+	const ctx: any = {
+		model: { provider: "dynamic-catalog-provider", id: "initial-model" },
+		modelRegistry: {
+			getProviderAuthStatus: () => ({ configured: true, source: "environment" }),
+			getApiKeyForProvider: async () => "test-key",
+			refresh: async (options: any) => {
+				refreshCalls++;
+				refreshOptions = options;
+				await registered.refreshModels({
+					allowNetwork: true,
+					force: true,
+					credential: { type: "api_key", key: "test-key" },
+					publish: async () => true,
+					signal: new AbortController().signal,
+				});
+			},
+		},
+		ui: {
+			notify: (message: string) => notifications.push(message),
+		},
+	};
+
+	await commands.status.handler("refresh", ctx);
+
+	assert.equal(refreshCalls, 1);
+	assert.deepEqual(refreshOptions, {
+		force: true,
+		allowNetwork: true,
+		providers: ["dynamic-catalog-provider"],
+	});
+	const report = notifications.at(-1) ?? "";
+	assert.match(report, /Catalog:/);
+	assert.match(report, /Models: 2/);
+	assert.match(report, /Status: fresh · live/);
+});
+
+test("continues status reporting when modelRegistry.refresh throws an error", async () => {
+	const commands: Record<string, any> = {};
+	const extension = createPiProviderRuntime(async () => providerDefinition("failing-catalog-provider"), {
+		enableOfficialPricingFallback: false,
+	});
+	await extension(createPi(commands) as any);
+
+	const notifications: string[] = [];
+	const ctx: any = authContext("failing-catalog-provider");
+	ctx.modelRegistry.refresh = async () => {
+		throw new Error("Network timeout during catalog refresh");
+	};
+	ctx.ui.notify = (message: string) => notifications.push(message);
+
+	await commands.status.handler("refresh", ctx);
+
+	assert.equal(notifications.length, 1);
+	assert.match(notifications[0]!, /Provider: failing-catalog-provider/);
+});
