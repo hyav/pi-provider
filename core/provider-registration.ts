@@ -1,4 +1,4 @@
-import type { ExtensionAPI, ProviderConfig } from "@earendil-works/pi-coding-agent";
+import type { ProviderConfig } from "@earendil-works/pi-coding-agent";
 import { validateProviderModelDrafts } from "./adapter-validation.ts";
 import { applyOfficialModelCosts, findOfficialMeta, type OfficialModelMeta } from "./official-pricing.ts";
 import { resolvePricingDetails } from "./pricing-adjustments.ts";
@@ -16,6 +16,11 @@ import type {
 
 const DEFAULT_CONTEXT_WINDOW = 128_000;
 const DEFAULT_MAX_TOKENS = 16_384;
+
+type ProviderRegistrationApi = {
+	registerProvider(name: string, config: ProviderConfig): void;
+	unregisterProvider?(name: string): void;
+};
 
 function finiteNonNegative(value: unknown): number {
 	return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : 0;
@@ -233,10 +238,21 @@ function replaceModels(target: ProviderModel[], source: ProviderModel[]): Provid
 	return target;
 }
 
-function lacksCatalogRefreshCredential(apiKey: string, context: ProviderRefreshContext): boolean {
-	if (context.allowNetwork !== true || context.credential !== undefined) return false;
+function hasMissingEnvironmentReference(apiKey: string): boolean {
 	const environmentNames = getEnvironmentReferences(apiKey);
 	return environmentNames.length > 0 && environmentNames.some((name) => !process.env[name]);
+}
+
+function lacksCatalogRefreshCredential(apiKey: string, context: ProviderRefreshContext): boolean {
+	return context.allowNetwork === true && context.credential === undefined && hasMissingEnvironmentReference(apiKey);
+}
+
+function shouldOmitOptionalApiKey(adapter: ProviderAdapter, runtime: PiProviderDependencies): boolean {
+	return (
+		adapter.provider.oauth !== undefined &&
+		hasMissingEnvironmentReference(adapter.provider.apiKey) &&
+		runtime.readStoredCredential(adapter.id)?.type !== "api_key"
+	);
 }
 
 /**
@@ -276,6 +292,10 @@ export function prepareProviderRegistration(
 
 	const { models: _draftModels, refreshModels: originalRefresh, ...providerMetadata } = adapter.provider;
 	const registeredProvider: ProviderConfig = { ...providerMetadata, models };
+	// Pi 0.84.2 resolves a declared environment API key before it can skip an
+	// unauthenticated catalog refresh. Register OAuth-only until the optional
+	// key exists, while preserving API-key credentials already stored by Pi.
+	if (shouldOmitOptionalApiKey(adapter, runtime)) delete registeredProvider.apiKey;
 	if (originalRefresh) {
 		registeredProvider.refreshModels = async (options: ProviderRefreshContext) => {
 			// Pi may ask every dynamic Provider to refresh. Keep the current catalog
@@ -329,7 +349,7 @@ export function cancelDeferredProviderRegistrations(providers: readonly Provider
 }
 
 export function refreshProviderRegistrations(
-	pi: Pick<ExtensionAPI, "registerProvider">,
+	pi: ProviderRegistrationApi,
 	providers: readonly ProviderAdapter[],
 	runtime: PiProviderDependencies,
 	officialPricing: Record<string, OfficialModelMeta>,
@@ -348,13 +368,16 @@ export function refreshProviderRegistrations(
 }
 
 export function registerProviderAdapter(
-	pi: Pick<ExtensionAPI, "registerProvider">,
+	pi: ProviderRegistrationApi,
 	adapter: ProviderAdapter,
 	runtime: PiProviderDependencies,
 	officialPricing: Record<string, OfficialModelMeta> = {},
 	modelDrafts?: ProviderModelDraft[],
 ): ProviderConfig {
 	const registeredProvider = prepareProviderRegistration(adapter, runtime, officialPricing, modelDrafts);
+	// Pi merges re-registrations, so omission alone cannot clear a raw API key
+	// left by the previous extension instance during /reload.
+	if (registeredProvider.apiKey === undefined) pi.unregisterProvider?.(adapter.id);
 	pi.registerProvider(adapter.id, registeredProvider);
 	return registeredProvider;
 }

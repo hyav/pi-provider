@@ -61,9 +61,10 @@ function getStartupBridge(pi: ExtensionAPI): StartupBridge {
 	);
 }
 
-function emitRegistration(pi: ExtensionAPI, envelope: AdapterRegistrationEnvelope): void {
+function emitRegistration(pi: ExtensionAPI, envelope: AdapterRegistrationEnvelope, onSessionStart?: () => void): void {
 	pi.events.emit(PI_PROVIDER_ADAPTER_EVENT, envelope);
 	pi.on("session_start", () => {
+		onSessionStart?.();
 		pi.events.emit(PI_PROVIDER_ADAPTER_EVENT, envelope);
 	});
 }
@@ -92,17 +93,26 @@ function createAdapterExtension<TAdapter extends ProviderAdapter | StatusAdapter
 			// Host runs in a different Pi module context and cannot use this
 			// extension's module-local state. The factory is retained so a Host
 			// loaded later can recreate the adapter with its configured runtime.
-			registerProviderAdapter(pi, providerAdapter, bridge.dependencies, {}, modelDrafts);
-			emitRegistration(pi, {
-				version: PI_PROVIDER_ADAPTER_PROTOCOL_VERSION,
-				kind: "provider",
-				id,
-				token,
-				adapter: providerAdapter,
-				factory: createAdapter,
-				startupDependencies: bridge.dependencies,
-				modelDrafts,
-			});
+			const registeredProvider = registerProviderAdapter(pi, providerAdapter, bridge.dependencies, {}, modelDrafts);
+			emitRegistration(
+				pi,
+				{
+					version: PI_PROVIDER_ADAPTER_PROTOCOL_VERSION,
+					kind: "provider",
+					id,
+					token,
+					adapter: providerAdapter,
+					factory: createAdapter,
+					startupDependencies: bridge.dependencies,
+					modelDrafts,
+				},
+				// During extension loading Pi can only remove queued registrations;
+				// repeat OAuth-only replacement after binding so /reload clears a
+				// raw environment key retained by Pi's merge semantics.
+				registeredProvider.apiKey === undefined
+					? () => registerProviderAdapter(pi, providerAdapter, bridge.dependencies, {}, modelDrafts)
+					: undefined,
+			);
 			return;
 		}
 		if (kind === "status") {

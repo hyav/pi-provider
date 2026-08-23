@@ -509,6 +509,42 @@ test("each public helper creates one registration envelope and provider register
 	}
 });
 
+test("an OAuth-only Provider clears a queued environment key when the session starts", async () => {
+	const environmentName = "PI_PROVIDER_OAUTH_RELOAD_KEY";
+	const previous = process.env[environmentName];
+	delete process.env[environmentName];
+	try {
+		const pi = new TestPi();
+		const id = "oauth-reload-provider";
+		const factory = defineProviderExtension({
+			id,
+			create: () => ({
+				...providerAdapter(id),
+				provider: {
+					...providerAdapter(id).provider,
+					apiKey: `$${environmentName}`,
+					oauth: {
+						name: "OAuth Reload Provider",
+						login: async () => ({ access: "access", refresh: "refresh", expires: 1 }),
+						refreshToken: async (credential) => credential,
+						getApiKey: (credential) => credential.access,
+					},
+				},
+			}),
+		});
+		await factory(pi as unknown as ExtensionAPI);
+		pi.providers.set(id, { ...pi.providers.get(id), apiKey: `$${environmentName}` });
+
+		await pi.emit("session_start", { type: "session_start", reason: "reload" }, pi.context(id));
+
+		assert.equal(pi.providers.get(id)?.apiKey, undefined);
+		assert.equal(pi.providerCalls.filter((providerId) => providerId === id).length, 2);
+	} finally {
+		if (previous === undefined) delete process.env[environmentName];
+		else process.env[environmentName] = previous;
+	}
+});
+
 test("helpers isolate invalid static identity, returned identity, timing, shape, and factory errors", async () => {
 	assert.throws(
 		() => defineProviderExtension({ id: "invalid id", create: () => providerAdapter("invalid id") } as any),

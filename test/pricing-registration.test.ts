@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { prepareProviderRegistration, refreshProviderRegistrations } from "../core/provider-registration.ts";
+import {
+	prepareProviderRegistration,
+	refreshProviderRegistrations,
+	registerProviderAdapter,
+} from "../core/provider-registration.ts";
 import { getDefaultPiProviderDependencies } from "../core/runtime-config.ts";
 import type { ProviderAdapter } from "../core/types.ts";
 
@@ -256,6 +260,77 @@ test("refreshes the pricing sidecar when a dynamic catalog changes", async () =>
 	assert.equal(adapter.registration?.modelMetadata?.["initial-model"], undefined);
 	assert.equal(adapter.registration?.modelMetadata?.["refreshed-model"]?.pricing.source, "official");
 	assert.equal(adapter.registration?.modelMetadata?.["refreshed-model"]?.quality?.[0]?.category, "intelligence");
+});
+
+test("registers an OAuth-only Provider when its optional environment API key is absent", () => {
+	const environmentName = "PI_PROVIDER_OPTIONAL_OAUTH_API_KEY";
+	const previous = process.env[environmentName];
+	delete process.env[environmentName];
+	try {
+		const adapter = providerAdapter();
+		adapter.provider.apiKey = `$${environmentName}`;
+		adapter.provider.authHeader = true;
+		adapter.provider.oauth = {
+			name: "Optional OAuth",
+			login: async () => ({ access: "access", refresh: "refresh", expires: 1 }),
+			refreshToken: async (credential) => credential,
+			getApiKey: (credential) => credential.access,
+		};
+		const runtime = getDefaultPiProviderDependencies();
+		runtime.readStoredCredential = () => undefined;
+
+		const registered = prepareProviderRegistration(adapter, runtime);
+
+		assert.equal(registered.apiKey, undefined);
+		assert.equal(registered.oauth, adapter.provider.oauth);
+		assert.equal(registered.authHeader, true);
+
+		runtime.readStoredCredential = () => ({ type: "api_key" });
+		assert.equal(prepareProviderRegistration(adapter, runtime).apiKey, `$${environmentName}`);
+		runtime.readStoredCredential = () => undefined;
+		process.env[environmentName] = "configured-key";
+		assert.equal(prepareProviderRegistration(adapter, runtime).apiKey, `$${environmentName}`);
+	} finally {
+		if (previous === undefined) delete process.env[environmentName];
+		else process.env[environmentName] = previous;
+	}
+});
+
+test("clears a previously registered environment key before switching to OAuth-only auth", () => {
+	const environmentName = "PI_PROVIDER_RELOADED_OPTIONAL_API_KEY";
+	const previous = process.env[environmentName];
+	delete process.env[environmentName];
+	try {
+		const adapter = providerAdapter();
+		adapter.provider.apiKey = `$${environmentName}`;
+		adapter.provider.oauth = {
+			name: "Reloaded OAuth",
+			login: async () => ({ access: "access", refresh: "refresh", expires: 1 }),
+			refreshToken: async (credential) => credential,
+			getApiKey: (credential) => credential.access,
+		};
+		const runtime = getDefaultPiProviderDependencies();
+		runtime.readStoredCredential = () => undefined;
+		const operations: string[] = [];
+
+		registerProviderAdapter(
+			{
+				unregisterProvider: (id) => {
+					operations.push(`unregister:${id}`);
+				},
+				registerProvider: (id, config) => {
+					operations.push(`register:${id}:${config.apiKey ?? "oauth"}`);
+				},
+			},
+			adapter,
+			runtime,
+		);
+
+		assert.deepEqual(operations, ["unregister:discounted-provider", "register:discounted-provider:oauth"]);
+	} finally {
+		if (previous === undefined) delete process.env[environmentName];
+		else process.env[environmentName] = previous;
+	}
 });
 
 test("skips a dynamic catalog network refresh when its API-key environment is absent", async () => {
