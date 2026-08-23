@@ -1,5 +1,5 @@
 import type { StatusAdapter, StatusEntry, StatusSnapshot } from "@hyav/pi-provider";
-import { defineStatusExtension, ProviderDataError, parseRetryAfter } from "@hyav/pi-provider";
+import { defineStatusExtension, hasBaseUrlOrigin, ProviderDataError, parseRetryAfter } from "@hyav/pi-provider";
 
 export const OPENCODE_GO_USAGE_URL = "https://opencode.ai/zen/go/v1/usage";
 
@@ -70,6 +70,7 @@ export const openCodeGoStatusAdapter: StatusAdapter = {
 	name: "OpenCode Go",
 	cacheTtlMs: 60_000,
 	requestTimeoutMs: 8_000,
+	supportsModel: (model) => hasBaseUrlOrigin(model.baseUrl, OPENCODE_GO_USAGE_URL),
 	async fetch(context): Promise<StatusSnapshot> {
 		const key = await context.getApiKey();
 		if (!key || key === "proxy-managed") {

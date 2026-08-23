@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { PreflightManager } from "../core/preflight-manager.ts";
 import { createCharmHyperPreflightAdapter } from "../preflight/charm-hyper.ts";
 import { createDeepSeekPreflightAdapter } from "../preflight/deepseek.ts";
 import { createGooglePreflightAdapter } from "../preflight/google.ts";
@@ -473,7 +474,80 @@ test("moonshot and hugging face preflights check their catalogs", async () => {
 	}
 });
 
-test("Vercel AI Gateway preflight checks a mixed-type catalog", async () => {
+test("routes OpenAI preflight through the effective model endpoint with resolved auth headers", async () => {
+	const { createOpenAIPreflightAdapter } = await import("../preflight/openai.ts");
+	let requestUrl: string | undefined;
+	let requestHeaders: Headers | undefined;
+	const manager = new PreflightManager(
+		[createOpenAIPreflightAdapter(1_000)],
+		async (input, init) => {
+			requestUrl = String(input);
+			requestHeaders = new Headers(init?.headers);
+			return new Response(JSON.stringify({ data: [{ id: "gpt-proxy" }] }), { status: 200 });
+		},
+		() => 50_000,
+	);
+	const result = await manager.update(
+		{
+			model: {
+				provider: "openai",
+				id: "gpt-proxy",
+				baseUrl: "https://api.openai.com/v1",
+			} as any,
+			modelRegistry: {
+				getApiKeyAndHeaders: async () => ({
+					ok: true as const,
+					headers: { "x-proxy-token": "resolved-token" },
+					baseUrl: "https://proxy.example.test/openai/v1",
+				}),
+				getApiKeyForProvider: async () => "legacy-key",
+			},
+		} as any,
+		{ force: true },
+	);
+
+	assert.equal(result, "refreshed");
+	assert.equal(requestUrl, "https://proxy.example.test/openai/v1/models");
+	assert.equal(requestHeaders?.get("x-proxy-token"), "resolved-token");
+	assert.equal(requestHeaders?.get("authorization"), null);
+});
+
+test("routes GitHub Copilot preflight through its credential-specific Enterprise endpoint", async () => {
+	const { createGithubCopilotPreflightAdapter } = await import("../preflight/github-copilot.ts");
+	let requestUrl: string | undefined;
+	const manager = new PreflightManager(
+		[createGithubCopilotPreflightAdapter(1_000)],
+		async (input, init) => {
+			requestUrl = String(input);
+			assert.equal(new Headers(init?.headers).get("authorization"), "Bearer enterprise-token");
+			return new Response(JSON.stringify({ data: [{ id: "gpt-enterprise" }] }), { status: 200 });
+		},
+		() => 51_000,
+	);
+	const result = await manager.update(
+		{
+			model: {
+				provider: "github-copilot",
+				id: "gpt-enterprise",
+				baseUrl: "https://api.individual.githubcopilot.com",
+			} as any,
+			modelRegistry: {
+				getApiKeyAndHeaders: async () => ({
+					ok: true as const,
+					apiKey: "enterprise-token",
+					baseUrl: "https://api.enterprise.githubcopilot.com",
+				}),
+				getApiKeyForProvider: async () => "enterprise-token",
+			},
+		} as any,
+		{ force: true },
+	);
+
+	assert.equal(result, "refreshed");
+	assert.equal(requestUrl, "https://api.enterprise.githubcopilot.com/models");
+});
+
+test("Vercel AI Gateway preflight checks a mixed-type catalog without claiming authentication", async () => {
 	const { parseVercelModelIds, vercelAIGatewayPreflightAdapter } = await import("../preflight/vercel-ai-gateway.ts");
 	assert.deepEqual(
 		[
@@ -494,13 +568,15 @@ test("Vercel AI Gateway preflight checks a mixed-type catalog", async () => {
 			assert.equal(String(input), "https://ai-gateway.vercel.sh/v1/models");
 			return new Response(JSON.stringify({ data: [{ id: "openai/gpt-5.6", type: "language" }] }), { status: 200 });
 		},
-		getApiKey: async () => "vercel-key",
+		getApiKey: async () => {
+			throw new Error("the public catalog must not resolve a credential");
+		},
 		now: () => 99_000,
 		model: { provider: "vercel-ai-gateway", id: "openai/gpt-5.6" } as any,
 	});
 	assert.deepEqual(snapshot, {
 		passed: true,
-		checks: ["endpoint", "auth", "catalog"],
+		checks: ["endpoint", "catalog"],
 		updatedAt: 99_000,
 		httpStatus: 200,
 	});

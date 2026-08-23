@@ -17,8 +17,16 @@ export {
 	defineStatusExtension,
 	defineTunerExtension,
 } from "./core/adapter-extensions.ts";
+export { MAX_PROVIDER_MODEL_COUNT } from "./core/adapter-validation.ts";
 export { createCatalogPreflightAdapter } from "./core/catalog-preflight.ts";
 export { withDeadline } from "./core/deadline.ts";
+export {
+	appendBaseUrlPath,
+	authDefinesHeader,
+	getContextAuth,
+	hasBaseUrlOrigin,
+	mergeDiagnosticHeaders,
+} from "./core/diagnostic-auth.ts";
 export type { ProviderDataErrorLike } from "./core/errors.ts";
 export { isProviderDataError, ProviderDataError } from "./core/errors.ts";
 export type {
@@ -103,6 +111,7 @@ export type {
 	ProviderPricingPolicy,
 	ProviderPricingSource,
 	ProviderRefreshContext,
+	ProviderRequestAuth,
 	StatusAdapter,
 	StatusAmountEntry,
 	StatusContext,
@@ -116,7 +125,7 @@ export type {
 } from "./core/types.ts";
 
 export interface PiProviderExtensionOptions {
-	/** User adapter root; replaces the default `<agentDir>/pi-provider` directory. */
+	/** User adapter root; replaces the default `<agentDir>/extensions/pi-provider` directory. */
 	adapterRoot?: string;
 	/** Host runtime dependency overrides. */
 	dependencies?: Partial<PiProviderDependencies>;

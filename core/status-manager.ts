@@ -1,5 +1,7 @@
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { deriveCredentialType } from "./credential-type.ts";
 import { isValidTimeoutMs, withDeadline } from "./deadline.ts";
+import { applyDiagnosticBaseUrl, type DiagnosticModelRegistry, resolveDiagnosticAuth } from "./diagnostic-auth.ts";
 import { isProviderDataError, ProviderDataError } from "./errors.ts";
 import type {
 	StatusAdapter,
@@ -10,11 +12,11 @@ import type {
 	StatusWindowEntry,
 } from "./types.ts";
 
+type StatusModel = NonNullable<ExtensionContext["model"]>;
+
 export interface StatusContextLike {
-	model?: { provider?: string };
-	modelRegistry: {
-		getApiKeyForProvider(provider: string): Promise<string | undefined>;
-	};
+	model?: { provider?: string; id?: string; baseUrl?: string };
+	modelRegistry: DiagnosticModelRegistry;
 	/** Optional credential identity used to isolate cached account data. */
 	getCredentialKey?: () => Promise<string | undefined>;
 	/** Optional non-secret credential metadata for provider-specific account labels. */
@@ -223,10 +225,21 @@ export class StatusManager {
 			const cancellation = new AbortController();
 			const generation = ++state.generation;
 			const promise = withDeadline(
-				(signal) =>
-					adapter.fetch({
+				async (signal) => {
+					const sourceModel = ctx.model as StatusModel;
+					const auth = await resolveDiagnosticAuth(sourceModel, ctx.modelRegistry);
+					const model = applyDiagnosticBaseUrl(sourceModel, auth);
+					if (adapter.supportsModel && !adapter.supportsModel(model)) {
+						throw new ProviderDataError(
+							"Status endpoint is unavailable for the effective model URL",
+							"unsupported",
+						);
+					}
+					return await adapter.fetch({
 						fetch: this.fetchFn,
-						getApiKey: () => ctx.modelRegistry.getApiKeyForProvider(adapter.providerId),
+						getApiKey: async () => auth.apiKey,
+						getAuth: async () => auth,
+						model,
 						...(ctx.getCredentialMetadata === undefined
 							? {}
 							: {
@@ -235,7 +248,8 @@ export class StatusManager {
 								}),
 						now: this.now,
 						signal,
-					}),
+					});
+				},
 				adapter.requestTimeoutMs,
 				cancellation.signal,
 			);
@@ -262,6 +276,11 @@ export class StatusManager {
 		} catch (error) {
 			if (state.generation !== generation || isErrorNamed(error, "AbortError")) return "skipped";
 			const dataError = isProviderDataError(error) ? error : undefined;
+			if (dataError?.code === "unsupported") {
+				state.snapshot = undefined;
+				state.lastError = undefined;
+				return "skipped";
+			}
 			const code = dataError?.code ?? (isErrorNamed(error, "TimeoutError") ? "timeout" : "fetch");
 			const retryAt =
 				dataError?.retryAt !== undefined && Number.isFinite(dataError.retryAt) ? dataError.retryAt : undefined;

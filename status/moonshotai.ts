@@ -1,5 +1,5 @@
 import type { StatusAdapter, StatusEntry, StatusSnapshot } from "@hyav/pi-provider";
-import { defineStatusExtension, ProviderDataError, parseRetryAfter } from "@hyav/pi-provider";
+import { defineStatusExtension, hasBaseUrlOrigin, ProviderDataError, parseRetryAfter } from "@hyav/pi-provider";
 
 /**
  * Moonshot (Kimi) balance checks. International and China platforms keep
@@ -65,6 +65,7 @@ export function createMoonshotStatusAdapter(config: MoonshotStatusConfig, reques
 		name: config.name,
 		cacheTtlMs: 60_000,
 		requestTimeoutMs,
+		supportsModel: (model) => hasBaseUrlOrigin(model.baseUrl, config.balanceUrl),
 		async fetch(context): Promise<StatusSnapshot> {
 			const key = await context.getApiKey();
 			if (!key || key === "proxy-managed") {

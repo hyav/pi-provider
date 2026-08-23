@@ -66,6 +66,7 @@ export function createPiProviderHost(dependencies: Partial<PiProviderDependencie
 		let readyPromise: Promise<PiProviderRuntimeController | undefined> | undefined;
 		let disposed = false;
 		let lifecycleGeneration = 0;
+		let pricingRefreshController: AbortController | undefined;
 		let latestBackgroundPricing: Record<string, OfficialModelMeta> | undefined;
 		let installedDefinition:
 			| {
@@ -85,9 +86,28 @@ export function createPiProviderHost(dependencies: Partial<PiProviderDependencie
 			refreshProviderRegistrations(pi, installedDefinition.definition.providers, runtime, snapshot);
 		};
 		const officialPricing = runtime.enableOfficialPricingFallback
-			? fetchOfficialPricingForHost(runtime, onBackgroundRefresh)
+			? fetchOfficialPricingForHost(runtime, { allowNetwork: false })
 			: Promise.resolve({});
 		const bridge: StartupBridge = { dependencies: runtime, officialPricing };
+
+		const startOfficialPricingRefresh = (): void => {
+			pricingRefreshController?.abort();
+			pricingRefreshController = undefined;
+			if (!runtime.enableOfficialPricingFallback || disposed) {
+				return;
+			}
+			const controller = new AbortController();
+			pricingRefreshController = controller;
+			void fetchOfficialPricingForHost(runtime, { signal: controller.signal })
+				.then((snapshot) => {
+					if (controller.signal.aborted || disposed) return;
+					onBackgroundRefresh(snapshot);
+				})
+				.catch(() => undefined)
+				.finally(() => {
+					if (pricingRefreshController === controller) pricingRefreshController = undefined;
+				});
+		};
 
 		const invalidateRuntime = (): void => {
 			lifecycleGeneration++;
@@ -412,6 +432,7 @@ export function createPiProviderHost(dependencies: Partial<PiProviderDependencie
 		});
 		pi.on("session_start", (event, ctx) => {
 			invalidateRuntime();
+			startOfficialPricingRefresh();
 			scheduleModelCatalogRefresh(ctx, event.reason);
 		});
 		pi.on("before_provider_request", async (event, ctx) => {
@@ -426,6 +447,8 @@ export function createPiProviderHost(dependencies: Partial<PiProviderDependencie
 		});
 		pi.on("session_shutdown", () => {
 			disposed = true;
+			pricingRefreshController?.abort();
+			pricingRefreshController = undefined;
 			invalidateRuntime();
 			unsubscribeHostClaim();
 			unsubscribeBridge();
@@ -444,7 +467,7 @@ export function createPiProviderHost(dependencies: Partial<PiProviderDependencie
 
 function fetchOfficialPricingForHost(
 	runtime: PiProviderDependencies,
-	onBackgroundRefresh?: (snapshot: Record<string, OfficialModelMeta>) => void,
+	options: { allowNetwork?: boolean; signal?: AbortSignal } = {},
 ) {
 	return fetchOfficialPricing(
 		runtime.fetch,
@@ -456,8 +479,7 @@ function fetchOfficialPricingForHost(
 		{
 			cachePath:
 				runtime.officialPricingUrl === OPENROUTER_MODELS_URL ? runtime.openRouterMetadataCachePath : undefined,
-			background: runtime.officialPricingUrl === OPENROUTER_MODELS_URL,
-			onBackgroundRefresh,
+			...options,
 		},
 	);
 }

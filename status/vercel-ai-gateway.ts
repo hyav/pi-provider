@@ -1,5 +1,5 @@
 import type { StatusAdapter, StatusSnapshot } from "@hyav/pi-provider";
-import { defineStatusExtension, ProviderDataError, parseRetryAfter } from "@hyav/pi-provider";
+import { defineStatusExtension, hasBaseUrlOrigin, ProviderDataError, parseRetryAfter } from "@hyav/pi-provider";
 import { VERCEL_PROVIDER_ID } from "./vercel-ai-gateway/constants.ts";
 
 export const VERCEL_CREDITS_URL = "https://ai-gateway.vercel.sh/v1/credits";
@@ -41,6 +41,7 @@ export function createVercelAIGatewayStatusAdapter(requestTimeoutMs: number): St
 		name: "Vercel AI Gateway",
 		cacheTtlMs: 30_000,
 		requestTimeoutMs,
+		supportsModel: (model) => hasBaseUrlOrigin(model.baseUrl, VERCEL_CREDITS_URL),
 		async fetch(context): Promise<StatusSnapshot> {
 			const key = await context.getApiKey();
 			if (!key || key === "proxy-managed") {

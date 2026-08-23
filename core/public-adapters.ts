@@ -18,8 +18,16 @@ export {
 	defineStatusExtension,
 	defineTunerExtension,
 } from "./adapter-extensions.ts";
+export { MAX_PROVIDER_MODEL_COUNT } from "./adapter-validation.ts";
 export { createCatalogPreflightAdapter } from "./catalog-preflight.ts";
 export { withDeadline } from "./deadline.ts";
+export {
+	appendBaseUrlPath,
+	authDefinesHeader,
+	getContextAuth,
+	hasBaseUrlOrigin,
+	mergeDiagnosticHeaders,
+} from "./diagnostic-auth.ts";
 export { isProviderDataError, ProviderDataError } from "./errors.ts";
 export { createOpenCodeCatalogPreflightAdapter } from "./opencode-preflight.ts";
 export type {
@@ -38,6 +46,7 @@ export type {
 	ProviderModel,
 	ProviderModelDraft,
 	ProviderRefreshContext,
+	ProviderRequestAuth,
 	StatusAdapter,
 	StatusContext,
 	StatusEntry,

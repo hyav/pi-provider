@@ -1,5 +1,5 @@
 import type { StatusAdapter, StatusEntry, StatusSnapshot } from "@hyav/pi-provider";
-import { defineStatusExtension, ProviderDataError, parseRetryAfter } from "@hyav/pi-provider";
+import { defineStatusExtension, hasBaseUrlOrigin, ProviderDataError, parseRetryAfter } from "@hyav/pi-provider";
 
 /**
  * Anthropic usage endpoint for subscription quotas (Claude Pro/Max) and extra
@@ -170,6 +170,10 @@ export function createAnthropicStatusAdapter(
 		name: "Anthropic",
 		cacheTtlMs: 60_000,
 		requestTimeoutMs,
+		supportsModel: (model) =>
+			usageUrl === "" ||
+			usageUrl !== DEFAULT_ANTHROPIC_USAGE_URL ||
+			hasBaseUrlOrigin(model.baseUrl, "https://api.anthropic.com"),
 		async fetch(context): Promise<StatusSnapshot> {
 			const key = await context.getApiKey();
 			if (!key || key === "proxy-managed") {

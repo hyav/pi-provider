@@ -1,15 +1,17 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { deriveCredentialType } from "./credential-type.ts";
 import { isValidTimeoutMs, withDeadline } from "./deadline.ts";
+import { applyDiagnosticBaseUrl, type DiagnosticModelRegistry, resolveDiagnosticAuth } from "./diagnostic-auth.ts";
 import { isProviderDataError, ProviderDataError } from "./errors.ts";
+import type { ProviderRequestAuth } from "./types.ts";
 
 export type PreflightModel = NonNullable<ExtensionContext["model"]>;
-
-type ModelRegistry = ExtensionContext["modelRegistry"];
 
 export interface PreflightContext {
 	fetch: typeof globalThis.fetch;
 	getApiKey: () => Promise<string | undefined>;
+	/** Complete model-scoped request authentication resolved by Pi. */
+	getAuth?: () => Promise<ProviderRequestAuth>;
 	signal?: AbortSignal;
 	now: () => number;
 	model: PreflightModel;
@@ -32,12 +34,14 @@ export interface PreflightAdapter {
 	name: string;
 	cacheTtlMs: number;
 	requestTimeoutMs: number;
+	/** Return false when this endpoint cannot safely serve the effective model URL. */
+	supportsModel?: (model: PreflightModel) => boolean;
 	fetch(context: PreflightContext): Promise<PreflightSnapshot>;
 }
 
 export interface PreflightContextLike {
 	model: PreflightModel;
-	modelRegistry: Pick<ModelRegistry, "getApiKeyForProvider">;
+	modelRegistry: DiagnosticModelRegistry;
 	/** Optional non-secret credential metadata for provider-specific account labels. */
 	getCredentialMetadata?: () => unknown;
 }
@@ -182,20 +186,30 @@ export class PreflightManager {
 			const cancellation = new AbortController();
 			const generation = ++state.generation;
 			const promise = withDeadline(
-				(signal) =>
-					adapter.fetch({
+				async (signal) => {
+					const auth = await resolveDiagnosticAuth(ctx.model, ctx.modelRegistry);
+					const model = applyDiagnosticBaseUrl(ctx.model, auth);
+					if (adapter.supportsModel && !adapter.supportsModel(model)) {
+						throw new ProviderDataError(
+							"Preflight endpoint is unavailable for the effective model URL",
+							"unsupported",
+						);
+					}
+					return await adapter.fetch({
 						fetch: this.fetchFn,
-						getApiKey: () => ctx.modelRegistry.getApiKeyForProvider(adapter.providerId),
+						getApiKey: async () => auth.apiKey,
+						getAuth: async () => auth,
 						now: this.now,
 						signal,
-						model: ctx.model,
+						model,
 						...(ctx.getCredentialMetadata === undefined
 							? {}
 							: {
 									getCredentialMetadata: ctx.getCredentialMetadata,
 									getCredentialType: async () => deriveCredentialType(ctx.getCredentialMetadata?.()),
 								}),
-					}),
+					});
+				},
 				adapter.requestTimeoutMs,
 				cancellation.signal,
 			);
@@ -217,6 +231,11 @@ export class PreflightManager {
 			return "refreshed";
 		} catch (error) {
 			if (state.generation !== generation || isErrorNamed(error, "AbortError")) return "skipped";
+			if (isProviderDataError(error) && error.code === "unsupported") {
+				state.snapshot = undefined;
+				state.lastError = undefined;
+				return "skipped";
+			}
 			state.lastError = errorState(error);
 			if (state.lastError.code === "timeout") {
 				state.generation++;

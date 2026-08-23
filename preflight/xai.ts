@@ -1,5 +1,5 @@
 import type { PreflightAdapter } from "@hyav/pi-provider";
-import { definePreflightExtension, ProviderDataError, parseRetryAfter } from "@hyav/pi-provider";
+import { definePreflightExtension, hasBaseUrlOrigin, ProviderDataError, parseRetryAfter } from "@hyav/pi-provider";
 import { XAI_MODELS_URL } from "../status/xai.ts";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -12,6 +12,7 @@ export const xaiPreflightAdapter: PreflightAdapter = {
 	name: "xAI",
 	cacheTtlMs: 30_000,
 	requestTimeoutMs: 8_000,
+	supportsModel: (model) => hasBaseUrlOrigin(model.baseUrl, XAI_MODELS_URL),
 	async fetch(context) {
 		const apiKey = await context.getApiKey();
 		const authHeaders: Record<string, string> = {

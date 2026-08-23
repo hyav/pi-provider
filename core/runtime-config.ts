@@ -173,6 +173,9 @@ export function resolvePiProviderDependencies(
 	dependencies: Partial<PiProviderDependencies> = {},
 ): PiProviderDependencies {
 	const runtime = { ...getDefaultPiProviderDependencies(), ...dependencies };
+	if (!Object.hasOwn(dependencies, "openRouterMetadataCachePath")) {
+		runtime.openRouterMetadataCachePath = getDefaultOpenRouterMetadataCachePath(runtime.agentDir);
+	}
 	if (runtime.pricingPolicies === undefined) runtime.pricingPolicies = {};
 	validatePiProviderDependencies(runtime);
 	return runtime;

@@ -1,13 +1,15 @@
 import { isValidTimeoutMs } from "./deadline.ts";
 import type { PreflightAdapter } from "./preflight-manager.ts";
 import { validatePricingAdjustment, validatePricingPolicy } from "./pricing-adjustments.ts";
-import type { ProviderAdapter, StatusAdapter, TunerAdapter } from "./types.ts";
+import type { ProviderAdapter, ProviderModelDraft, StatusAdapter, TunerAdapter } from "./types.ts";
 
 export type AdapterValue = ProviderAdapter | StatusAdapter | PreflightAdapter | TunerAdapter;
 
 const MAX_STABLE_ID_LENGTH = 128;
 const MAX_TEXT_LENGTH = 1_024;
 const MAX_MODEL_ID_LENGTH = 512;
+/** Maximum accepted models in one initial, cached, or refreshed Provider catalog. */
+export const MAX_PROVIDER_MODEL_COUNT = 4_096;
 
 export function isStableAdapterId(value: unknown): value is string {
 	return (
@@ -16,7 +18,7 @@ export function isStableAdapterId(value: unknown): value is string {
 		value.length <= MAX_STABLE_ID_LENGTH &&
 		value.trim() === value &&
 		!/\s/.test(value) &&
-		!/[\u0000-\u001f\u007f]/.test(value)
+		!/[\u0000-\u001f\u007f-\u009f]/.test(value)
 	);
 }
 
@@ -29,7 +31,7 @@ function isSafeText(value: unknown, maxLength = MAX_TEXT_LENGTH): value is strin
 		typeof value === "string" &&
 		value.trim() !== "" &&
 		value.length <= maxLength &&
-		!/[\u0000-\u001f\u007f]/.test(value)
+		!/[\u0000-\u001f\u007f-\u009f]/.test(value)
 	);
 }
 
@@ -95,6 +97,17 @@ function validateProviderModelDraft(value: unknown, label: string): void {
 	if (value.thinkingLevelMap !== undefined) assertAdapterObject(value.thinkingLevelMap, `${label}.thinkingLevelMap`);
 }
 
+export function validateProviderModelDrafts(
+	value: unknown,
+	label = "Provider model catalog",
+): asserts value is ProviderModelDraft[] {
+	if (!Array.isArray(value)) throw new Error(`${label} must be an array`);
+	if (value.length > MAX_PROVIDER_MODEL_COUNT) {
+		throw new Error(`${label} has too many models (maximum ${MAX_PROVIDER_MODEL_COUNT})`);
+	}
+	for (const [index, model] of value.entries()) validateProviderModelDraft(model, `${label} model ${index}`);
+}
+
 export function validateProviderAdapter(adapter: unknown): asserts adapter is ProviderAdapter {
 	assertAdapterObject(adapter, "Provider adapter");
 	assertStableId(adapter.id, "Provider adapter ID");
@@ -125,9 +138,7 @@ export function validateProviderAdapter(adapter: unknown): asserts adapter is Pr
 		}
 	}
 	if (!Array.isArray(provider.models)) throw new Error(`Provider ${adapter.id} must define a model list`);
-	for (const [index, model] of provider.models.entries()) {
-		validateProviderModelDraft(model, `Provider ${adapter.id} model ${index}`);
-	}
+	validateProviderModelDrafts(provider.models, `Provider ${adapter.id}`);
 	if (provider.refreshModels !== undefined && typeof provider.refreshModels !== "function") {
 		throw new Error(`Provider ${adapter.id} has invalid refreshModels`);
 	}
@@ -165,6 +176,9 @@ export function validateStatusAdapter(adapter: unknown): asserts adapter is Stat
 		throw new Error(`Status ${adapter.id} has invalid cache TTL`);
 	}
 	if (!isValidTimeoutMs(adapter.requestTimeoutMs)) throw new Error(`Status ${adapter.id} has invalid timing settings`);
+	if (adapter.supportsModel !== undefined && typeof adapter.supportsModel !== "function") {
+		throw new Error(`Status ${adapter.id} has invalid model support policy`);
+	}
 }
 
 export function validatePreflightAdapter(adapter: unknown): asserts adapter is PreflightAdapter {
@@ -178,6 +192,9 @@ export function validatePreflightAdapter(adapter: unknown): asserts adapter is P
 	}
 	if (!isValidTimeoutMs(adapter.requestTimeoutMs)) {
 		throw new Error(`Preflight ${adapter.id} has invalid timing settings`);
+	}
+	if (adapter.supportsModel !== undefined && typeof adapter.supportsModel !== "function") {
+		throw new Error(`Preflight ${adapter.id} has invalid model support policy`);
 	}
 }
 

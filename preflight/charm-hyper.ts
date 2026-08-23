@@ -1,5 +1,5 @@
 import type { PreflightAdapter } from "@hyav/pi-provider";
-import { definePreflightExtension, ProviderDataError, parseRetryAfter } from "@hyav/pi-provider";
+import { definePreflightExtension, hasBaseUrlOrigin, ProviderDataError, parseRetryAfter } from "@hyav/pi-provider";
 import { hyperJsonHeaders } from "../providers/charm-hyper/constants.ts";
 import { HYPER_MODELS_URL, HYPER_PROVIDER_URL, parseHyperModels } from "../providers/charm-hyper.ts";
 
@@ -10,6 +10,7 @@ export function createCharmHyperPreflightAdapter(requestTimeoutMs: number): Pref
 		name: "Charm Hyper",
 		cacheTtlMs: 30_000,
 		requestTimeoutMs,
+		supportsModel: (model) => hasBaseUrlOrigin(model.baseUrl, HYPER_PROVIDER_URL),
 		async fetch(context) {
 			const apiKey = await context.getApiKey();
 			if (!apiKey) return { passed: false, checks: ["auth"], updatedAt: context.now() };

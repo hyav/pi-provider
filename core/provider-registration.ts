@@ -1,4 +1,5 @@
 import type { ExtensionAPI, ProviderConfig } from "@earendil-works/pi-coding-agent";
+import { validateProviderModelDrafts } from "./adapter-validation.ts";
 import { applyOfficialModelCosts, findOfficialMeta, type OfficialModelMeta } from "./official-pricing.ts";
 import { resolvePricingDetails } from "./pricing-adjustments.ts";
 import type { PiProviderDependencies } from "./runtime-config.ts";
@@ -83,6 +84,7 @@ export function normalizeProviderModel(model: ProviderModelDraft): ProviderModel
 }
 
 export function normalizeProviderModels(models: ProviderModelDraft[]): ProviderModel[] {
+	validateProviderModelDrafts(models);
 	const seen = new Set<string>();
 	return models.map((model) => {
 		const normalized = normalizeProviderModel(model);
@@ -113,6 +115,7 @@ function resolveModelRegistration(
 	modelDrafts: ProviderModelDraft[],
 	officialPricing: Record<string, OfficialModelMeta>,
 ): { models: ProviderModel[]; modelMetadata: Record<string, ProviderModelMetadata> } {
+	validateProviderModelDrafts(modelDrafts, `Provider ${adapter.id}`);
 	const enrichedDrafts = applyOfficialModelCosts(modelDrafts, officialPricing);
 	const pricingPolicy = runtime.pricingPolicies?.[adapter.id] ?? adapter.pricing;
 	const metadata: Record<string, ProviderModelMetadata> = {};
@@ -215,6 +218,21 @@ function getEnvironmentReferences(value: string): string[] {
 	return [...names];
 }
 
+function getRegistrationState(adapter: ProviderAdapter): NonNullable<ProviderAdapter["registration"]> | undefined {
+	const registration = adapter.registration;
+	if (!registration) return undefined;
+	registration.normalizedModels ??= [];
+	registration.modelMetadata ??= {};
+	registration.officialPricing ??= {};
+	registration.activeRefreshes ??= 0;
+	return registration;
+}
+
+function replaceModels(target: ProviderModel[], source: ProviderModel[]): ProviderModel[] {
+	target.splice(0, target.length, ...source);
+	return target;
+}
+
 function lacksCatalogRefreshCredential(apiKey: string, context: ProviderRefreshContext): boolean {
 	if (context.allowNetwork !== true || context.credential !== undefined) return false;
 	const environmentNames = getEnvironmentReferences(apiKey);
@@ -238,9 +256,19 @@ export function prepareProviderRegistration(
 			? adapter.registration.modelDrafts
 			: adapter.provider.models);
 	const resolved = resolveModelRegistration(adapter, runtime, drafts, officialPricing);
-	const models = resolved.models;
+	const existingRegistration = getRegistrationState(adapter);
+	const registration: NonNullable<ProviderAdapter["registration"]> = existingRegistration ?? {
+		modelDrafts: drafts,
+		normalizedModels: [],
+		modelMetadata: {},
+		officialPricing,
+		activeRefreshes: 0,
+	};
+	registration.modelDrafts = drafts;
+	registration.modelMetadata = resolved.modelMetadata;
+	registration.officialPricing = officialPricing;
+	const models = replaceModels(registration.normalizedModels, resolved.models);
 	const adapterOwnsCatalog = adapter.catalog !== undefined;
-	const registration = { modelDrafts: drafts, normalizedModels: models, modelMetadata: resolved.modelMetadata };
 	adapter.registration = registration;
 	adapter.provider.models = models;
 	adapter.catalog ??= { source: "static", modelCount: models.length };
@@ -256,12 +284,12 @@ export function prepareProviderRegistration(
 			if (lacksCatalogRefreshCredential(adapter.provider.apiKey, options)) {
 				return [...registration.normalizedModels];
 			}
+			registration.activeRefreshes++;
 			try {
 				const refreshedModels = await originalRefresh(options);
-				const resolved = resolveModelRegistration(adapter, runtime, refreshedModels, officialPricing);
-				const normalizedModels = resolved.models;
+				const resolved = resolveModelRegistration(adapter, runtime, refreshedModels, registration.officialPricing);
+				const normalizedModels = replaceModels(registration.normalizedModels, resolved.models);
 				registration.modelDrafts = refreshedModels;
-				registration.normalizedModels = normalizedModels;
 				registration.modelMetadata = resolved.modelMetadata;
 				adapter.provider.models = normalizedModels;
 				registeredProvider.models = normalizedModels;
@@ -276,14 +304,28 @@ export function prepareProviderRegistration(
 						lastError: undefined,
 					};
 				}
-				return normalizedModels;
+				return [...normalizedModels];
 			} catch (error) {
 				if (adapter.catalog && !isAbortError(error)) adapter.catalog.lastError = getErrorCode(error);
 				throw error;
+			} finally {
+				registration.activeRefreshes = Math.max(0, registration.activeRefreshes - 1);
+				if (registration.activeRefreshes === 0 && registration.deferredRegistration) {
+					const deferred = registration.deferredRegistration;
+					registration.deferredRegistration = undefined;
+					queueMicrotask(deferred);
+				}
 			}
 		};
 	}
 	return registeredProvider;
+}
+
+export function cancelDeferredProviderRegistrations(providers: readonly ProviderAdapter[]): void {
+	for (const adapter of providers) {
+		const registration = getRegistrationState(adapter);
+		if (registration) registration.deferredRegistration = undefined;
+	}
 }
 
 export function refreshProviderRegistrations(
@@ -294,6 +336,13 @@ export function refreshProviderRegistrations(
 	providerDrafts?: ReadonlyMap<ProviderAdapter, ProviderModelDraft[]>,
 ): void {
 	for (const adapter of providers) {
+		const registration = getRegistrationState(adapter);
+		if (registration) registration.officialPricing = officialPricing;
+		if (registration && registration.activeRefreshes > 0) {
+			registration.deferredRegistration = () =>
+				registerProviderAdapter(pi, adapter, runtime, officialPricing, providerDrafts?.get(adapter));
+			continue;
+		}
 		registerProviderAdapter(pi, adapter, runtime, officialPricing, providerDrafts?.get(adapter));
 	}
 }

@@ -1,5 +1,5 @@
 import type { PreflightAdapter } from "@hyav/pi-provider";
-import { definePreflightExtension, ProviderDataError, parseRetryAfter } from "@hyav/pi-provider";
+import { definePreflightExtension, hasBaseUrlOrigin, ProviderDataError, parseRetryAfter } from "@hyav/pi-provider";
 
 export const GOOGLE_MODELS_URL = "https://generativelanguage.googleapis.com/v1beta/models";
 
@@ -28,6 +28,7 @@ export const googlePreflightAdapter: PreflightAdapter = {
 	name: "Google Gemini",
 	cacheTtlMs: 30_000,
 	requestTimeoutMs: 8_000,
+	supportsModel: (model) => hasBaseUrlOrigin(model.baseUrl, GOOGLE_MODELS_URL),
 	async fetch(context) {
 		const apiKey = await context.getApiKey();
 		if (!apiKey || apiKey === "proxy-managed") {

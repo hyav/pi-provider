@@ -11,7 +11,11 @@ import {
 } from "./official-pricing.ts";
 import type { PreflightContextLike } from "./preflight-manager.ts";
 import { PreflightManager } from "./preflight-manager.ts";
-import { refreshProviderRegistrations, registerProviderAdapter } from "./provider-registration.ts";
+import {
+	cancelDeferredProviderRegistrations,
+	refreshProviderRegistrations,
+	registerProviderAdapter,
+} from "./provider-registration.ts";
 import type { PiProviderDependencies, PiProviderLoader } from "./runtime-config.ts";
 import { resolvePiProviderDependencies } from "./runtime-config.ts";
 import type { StatusContextLike } from "./status-manager.ts";
@@ -392,6 +396,7 @@ export function installPiProviderRuntime(
 		lifecycleGeneration++;
 		statusPresentationGeneration++;
 		statusPresentationVisible = false;
+		cancelDeferredProviderRegistrations(providers);
 		statusManager.cancelAll();
 		statusManager.clear();
 		preflightManager.cancelAll();
@@ -444,43 +449,52 @@ export function createPiProviderRuntime(
 ): (pi: ExtensionAPI) => Promise<void> {
 	const runtime = resolvePiProviderDependencies(dependencies);
 	return async (pi) => {
-		let latestBackgroundPricing: Record<string, OfficialModelMeta> | undefined;
-		let installedDefinition: PiProviderDefinition | undefined;
 		let installedController: PiProviderRuntimeController | undefined;
 		let disposed = false;
-		const onBackgroundRefresh = (snapshot: Record<string, OfficialModelMeta>): void => {
-			latestBackgroundPricing = snapshot;
-			if (disposed) return;
-			installedController?.updateOfficialPricing?.(snapshot);
-			if (installedDefinition === undefined) return;
-			refreshProviderRegistrations(pi, installedDefinition.providers, runtime, snapshot);
-		};
+		let pricingRefreshController: AbortController | undefined;
+		const cachePath =
+			runtime.officialPricingUrl === OPENROUTER_MODELS_URL ? runtime.openRouterMetadataCachePath : undefined;
+		const fetchPricing = (options: { allowNetwork?: boolean; signal?: AbortSignal } = {}) =>
+			fetchOfficialPricing(
+				runtime.fetch,
+				runtime.officialPricingUrl,
+				runtime.officialPricingTimeoutMs,
+				runtime.officialPricingCacheTtlMs,
+				runtime.officialPricingMaxStaleMs,
+				runtime.now,
+				{ cachePath, ...options },
+			);
 		const officialPricingPromise = runtime.enableOfficialPricingFallback
-			? fetchOfficialPricing(
-					runtime.fetch,
-					runtime.officialPricingUrl,
-					runtime.officialPricingTimeoutMs,
-					runtime.officialPricingCacheTtlMs,
-					runtime.officialPricingMaxStaleMs,
-					runtime.now,
-					{
-						cachePath:
-							runtime.officialPricingUrl === OPENROUTER_MODELS_URL
-								? runtime.openRouterMetadataCachePath
-								: undefined,
-						background: runtime.officialPricingUrl === OPENROUTER_MODELS_URL,
-						onBackgroundRefresh: onBackgroundRefresh,
-					},
-				)
+			? fetchPricing({ allowNetwork: false })
 			: Promise.resolve({});
 		const definitionPromise = loadDefinition(runtime);
 		const [officialPricing, definition] = await Promise.all([officialPricingPromise, definitionPromise]);
 		validatePiProviderDefinition(definition);
-		installedController = installPiProviderRuntime(pi, runtime, definition, officialPricing);
-		installedDefinition = definition;
-		if (latestBackgroundPricing !== undefined) onBackgroundRefresh(latestBackgroundPricing);
+
+		pi.on("session_start", () => {
+			pricingRefreshController?.abort();
+			pricingRefreshController = undefined;
+			if (!runtime.enableOfficialPricingFallback || disposed) {
+				return;
+			}
+			const controller = new AbortController();
+			pricingRefreshController = controller;
+			void fetchPricing({ signal: controller.signal })
+				.then((snapshot) => {
+					if (disposed || controller.signal.aborted) return;
+					installedController?.updateOfficialPricing?.(snapshot);
+					refreshProviderRegistrations(pi, definition.providers, runtime, snapshot);
+				})
+				.catch(() => undefined)
+				.finally(() => {
+					if (pricingRefreshController === controller) pricingRefreshController = undefined;
+				});
+		});
 		pi.on("session_shutdown", () => {
 			disposed = true;
+			pricingRefreshController?.abort();
+			pricingRefreshController = undefined;
 		});
+		installedController = installPiProviderRuntime(pi, runtime, definition, officialPricing);
 	};
 }

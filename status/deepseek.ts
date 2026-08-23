@@ -1,5 +1,5 @@
 import type { StatusAdapter, StatusSnapshot } from "@hyav/pi-provider";
-import { defineStatusExtension, ProviderDataError, parseRetryAfter } from "@hyav/pi-provider";
+import { defineStatusExtension, hasBaseUrlOrigin, ProviderDataError, parseRetryAfter } from "@hyav/pi-provider";
 
 export const DEEPSEEK_BALANCE_URL = "https://api.deepseek.com/user/balance";
 
@@ -41,6 +41,7 @@ export const deepSeekStatusAdapter: StatusAdapter = {
 	name: "DeepSeek",
 	cacheTtlMs: 30_000,
 	requestTimeoutMs: 8_000,
+	supportsModel: (model) => hasBaseUrlOrigin(model.baseUrl, DEEPSEEK_BALANCE_URL),
 	async fetch(context): Promise<StatusSnapshot> {
 		const key = await context.getApiKey();
 		if (!key || key === "proxy-managed") {

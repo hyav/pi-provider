@@ -1,5 +1,5 @@
 import type { StatusAdapter, StatusSnapshot } from "@hyav/pi-provider";
-import { defineStatusExtension, ProviderDataError, parseRetryAfter } from "@hyav/pi-provider";
+import { defineStatusExtension, hasBaseUrlOrigin, ProviderDataError, parseRetryAfter } from "@hyav/pi-provider";
 import { hyperJsonHeaders } from "../providers/charm-hyper/constants.ts";
 
 const CREDITS_URL = "https://hyper.charm.land/v1/credits";
@@ -23,6 +23,7 @@ export const hyperStatusAdapter: StatusAdapter = {
 	name: "Charm Hyper",
 	cacheTtlMs: 60_000,
 	requestTimeoutMs: 8_000,
+	supportsModel: (model) => hasBaseUrlOrigin(model.baseUrl, CREDITS_URL),
 	async fetch(context): Promise<StatusSnapshot> {
 		const key = await context.getApiKey();
 		const headers = new Headers(hyperJsonHeaders({ "Accept-Encoding": "identity" }));

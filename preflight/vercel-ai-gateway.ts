@@ -37,11 +37,6 @@ export function createVercelAIGatewayPreflightAdapter(requestTimeoutMs: number):
 		cacheTtlMs: 30_000,
 		requestTimeoutMs,
 		async fetch(context): Promise<PreflightSnapshot> {
-			const key = await context.getApiKey();
-			if (!key || key === "proxy-managed") {
-				return { passed: false, checks: ["auth"], updatedAt: context.now() };
-			}
-
 			const response = await context.fetch(VERCEL_MODELS_URL, {
 				headers: {
 					Accept: "application/json",
@@ -67,7 +62,7 @@ export function createVercelAIGatewayPreflightAdapter(requestTimeoutMs: number):
 
 			return {
 				passed: parseVercelModelIds(payload).has(context.model.id),
-				checks: ["endpoint", "auth", "catalog"],
+				checks: ["endpoint", "catalog"],
 				updatedAt: context.now(),
 				httpStatus: response.status,
 			};

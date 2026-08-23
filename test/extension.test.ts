@@ -69,12 +69,21 @@ function providerDefinition(
 	};
 }
 
-function createPi(commands: Record<string, any>, registrations: string[] = []) {
+function createPi(
+	commands: Record<string, any>,
+	registrations: string[] = [],
+	handlers?: Map<string, Array<(event: any, context: any) => unknown>>,
+) {
 	return {
 		registerProvider(id: string) {
 			registrations.push(id);
 		},
-		on() {},
+		on(event: string, handler: (event: any, context: any) => unknown) {
+			if (!handlers) return;
+			const current = handlers.get(event) ?? [];
+			current.push(handler);
+			handlers.set(event, current);
+		},
 		registerCommand(name: string, command: any) {
 			commands[name] = command;
 		},
@@ -208,12 +217,17 @@ test("reapplies background official metadata after startup registration", async 
 		},
 	);
 	const registrations: Array<{ id: string; config: any }> = [];
+	const handlers = new Map<string, Array<(event: any, context: any) => unknown>>();
 	try {
 		await extension({
 			registerProvider(id: string, config: any) {
 				registrations.push({ id, config });
 			},
-			on() {},
+			on(event: string, handler: (event: any, context: any) => unknown) {
+				const current = handlers.get(event) ?? [];
+				current.push(handler);
+				handlers.set(event, current);
+			},
 			registerCommand() {},
 		} as any);
 
@@ -223,8 +237,12 @@ test("reapplies background official metadata after startup registration", async 
 			cacheRead: 0,
 			cacheWrite: 0,
 		});
+		assert.equal(release, undefined);
+		for (const handler of handlers.get("session_start") ?? []) {
+			await handler({ reason: "startup" }, { modelRegistry: { refresh: async () => undefined } });
+		}
 		await fetchStarted;
-		release?.();
+		(release as (() => void) | undefined)?.();
 
 		await new Promise<void>((resolve, reject) => {
 			let stopped = false;
@@ -796,6 +814,43 @@ test("runs one minimal live check for the active provider and model on check", a
 	assert.doesNotMatch(notifications.at(-1) ?? "", /\[(accent|dim)\]/);
 	assert.match(notifications.at(-1) ?? "", /Availability: verified/);
 	assert.match(notifications.at(-1) ?? "", /Live check: success · HTTP 200 OK · \d+ms/);
+});
+
+test("uses the credential-specific baseUrl for a live check request model", async () => {
+	const commands: Record<string, any> = {};
+	let requestBaseUrl: string | undefined;
+	const extension = createPiProviderRuntime(async () => providerDefinition("enterprise-check"), {
+		enableOfficialPricingFallback: false,
+	});
+	await extension(createPi(commands) as any);
+
+	const ctx: any = authContext("enterprise-check");
+	ctx.model = {
+		provider: "enterprise-check",
+		id: "model",
+		api: "openai-completions",
+		baseUrl: "https://individual.example.test/v1",
+	};
+	ctx.modelRegistry.getApiKeyAndHeaders = async () => ({
+		ok: true,
+		apiKey: "enterprise-key",
+		baseUrl: "https://enterprise.example.test/v1",
+	});
+	ctx.modelRegistry.getProvider = () => ({
+		streamSimple(model: any) {
+			requestBaseUrl = model.baseUrl;
+			return {
+				async *[Symbol.asyncIterator]() {
+					yield { type: "done", reason: "stop", message: {} };
+				},
+			};
+		},
+	});
+
+	await commands.status.handler("check", ctx);
+
+	assert.equal(requestBaseUrl, "https://enterprise.example.test/v1");
+	assert.equal(ctx.model.baseUrl, "https://individual.example.test/v1");
 });
 
 test("passes the runtime fetch implementation to a live check", async () => {
@@ -1748,6 +1803,7 @@ test("reports the native OpenAI Codex status without registering a fake provider
 test("shows quality and native field sources without replacing its price", async () => {
 	const commands: Record<string, any> = {};
 	const registrations: string[] = [];
+	const handlers = new Map<string, Array<(event: any, context: any) => unknown>>();
 	const extension = createPiProviderRuntime(async () => providerDefinition("managed-provider"), {
 		officialPricingUrl: "https://reference.invalid/models",
 		fetch: async () =>
@@ -1775,7 +1831,11 @@ test("shows quality and native field sources without replacing its price", async
 				{ status: 200 },
 			),
 	});
-	await extension(createPi(commands, registrations) as any);
+	await extension(createPi(commands, registrations, handlers) as any);
+	for (const handler of handlers.get("session_start") ?? []) {
+		await handler({ reason: "startup" }, { modelRegistry: { refresh: async () => undefined } });
+	}
+	await new Promise((resolve) => setImmediate(resolve));
 
 	const notifications: string[] = [];
 	const ctx: any = {
@@ -1801,7 +1861,7 @@ test("shows quality and native field sources without replacing its price", async
 
 	await commands.status.handler("", ctx);
 	const report = notifications.at(-1) ?? "";
-	assert.deepEqual(registrations, ["managed-provider"]);
+	assert.deepEqual(registrations, ["managed-provider", "managed-provider"]);
 	assert.match(report, /Context: 128k · Pi native/);
 	assert.match(report, /Max output: 16k · Pi native/);
 	assert.match(report, /Input: text · Pi native/);
@@ -1849,12 +1909,16 @@ test("updates native quality metrics after a non-blocking metadata refresh", asy
 	}) as typeof globalThis.fetch;
 	try {
 		const commands: Record<string, any> = {};
+		const handlers = new Map<string, Array<(event: any, context: any) => unknown>>();
 		const extension = createPiProviderRuntime(async () => providerDefinition("managed-provider"), {
 			fetch: fetchFn,
 			officialPricingCacheTtlMs: 0,
 			openRouterMetadataCachePath: join(root, "metadata.json"),
 		});
-		await extension(createPi(commands) as any);
+		await extension(createPi(commands, [], handlers) as any);
+		for (const handler of handlers.get("session_start") ?? []) {
+			await handler({ reason: "startup" }, { modelRegistry: { refresh: async () => undefined } });
+		}
 
 		const notifications: string[] = [];
 		const ctx: any = {

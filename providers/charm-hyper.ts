@@ -9,6 +9,7 @@ import type {
 import {
 	defineProviderExtension,
 	isProviderDataError,
+	MAX_PROVIDER_MODEL_COUNT,
 	normalizeProviderModels,
 	ProviderDataError,
 	withDeadline,
@@ -242,6 +243,7 @@ function parseCurrentHyperModel(value: unknown): ProviderModelDraft | undefined 
 
 function parseCurrentHyperModels(payload: Record<string, unknown>): ProviderModelDraft[] | undefined {
 	if (!Array.isArray(payload.models)) return undefined;
+	if (payload.models.length > MAX_PROVIDER_MODEL_COUNT) return [];
 	const models: ProviderModelDraft[] = [];
 	const seenIds = new Set<string>();
 	for (const value of payload.models) {
@@ -256,7 +258,7 @@ function parseCurrentHyperModels(payload: Record<string, unknown>): ProviderMode
 }
 
 function parseLegacyHyperModels(payload: Record<string, unknown>): ProviderModelDraft[] {
-	if (!Array.isArray(payload.data)) return [];
+	if (!Array.isArray(payload.data) || payload.data.length > MAX_PROVIDER_MODEL_COUNT) return [];
 	const models: ProviderModelDraft[] = [];
 	const seenIds = new Set<string>();
 
@@ -356,6 +358,7 @@ async function discoverHyperModels(
 			if (models.length === 0) {
 				throw new ProviderDataError("Charm Hyper model discovery returned no valid models", "badjson");
 			}
+			normalizeProviderModels(models);
 			return models;
 		},
 		timeoutMs,

@@ -1,12 +1,21 @@
 import type { StatusAdapter, StatusEntry, StatusSnapshot } from "@hyav/pi-provider";
-import { defineStatusExtension, ProviderDataError, parseRetryAfter } from "@hyav/pi-provider";
+import {
+	appendBaseUrlPath,
+	authDefinesHeader,
+	defineStatusExtension,
+	getContextAuth,
+	mergeDiagnosticHeaders,
+	ProviderDataError,
+	parseRetryAfter,
+} from "@hyav/pi-provider";
 
 /**
  * GitHub Copilot Individual usage. These endpoints are not part of public
  * GitHub documentation, so payload shapes are parsed defensively and a 404
  * degrades to a single explanatory entry instead of an error state.
  */
-export const COPILOT_USAGE_URL = "https://api.individual.githubcopilot.com/usage";
+export const COPILOT_BASE_URL = "https://api.individual.githubcopilot.com";
+export const COPILOT_USAGE_URL = `${COPILOT_BASE_URL}/usage`;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -109,17 +118,21 @@ export const githubCopilotStatusAdapter: StatusAdapter = {
 	cacheTtlMs: 60_000,
 	requestTimeoutMs: 8_000,
 	async fetch(context): Promise<StatusSnapshot> {
-		const key = await context.getApiKey();
+		const auth = await getContextAuth(context);
+		const key = auth.apiKey;
 		if (!key || key === "proxy-managed") {
 			throw new ProviderDataError("GitHub Copilot status requires Copilot OAuth", "auth");
 		}
-		const response = await context.fetch(COPILOT_USAGE_URL, {
-			headers: {
-				Accept: "application/json",
-				"Accept-Encoding": "identity",
-				Authorization: `Bearer ${key}`,
-				"User-Agent": "@hyav/pi-provider",
-			},
+		const url = appendBaseUrlPath(context.model?.baseUrl ?? auth.baseUrl, "usage", COPILOT_BASE_URL);
+		if (!url) throw new ProviderDataError("GitHub Copilot usage endpoint is unavailable", "unsupported");
+		const headers = mergeDiagnosticHeaders(auth, {
+			Accept: "application/json",
+			"Accept-Encoding": "identity",
+			"User-Agent": "@hyav/pi-provider",
+		});
+		if (!authDefinesHeader(auth, "Authorization")) headers.set("Authorization", `Bearer ${key}`);
+		const response = await context.fetch(url, {
+			headers,
 			signal: context.signal,
 		});
 		if (response.status === 404) {

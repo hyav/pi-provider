@@ -1,5 +1,5 @@
 import type { StatusAdapter, StatusEntry, StatusSnapshot } from "@hyav/pi-provider";
-import { defineStatusExtension, ProviderDataError, parseRetryAfter } from "@hyav/pi-provider";
+import { defineStatusExtension, hasBaseUrlOrigin, ProviderDataError, parseRetryAfter } from "@hyav/pi-provider";
 
 export const CODEX_USAGE_URL = "https://chatgpt.com/backend-api/wham/usage";
 const ACCOUNT_ID_CLAIM = "https://api.openai.com/auth";
@@ -170,6 +170,7 @@ export const openAICodexStatusAdapter: StatusAdapter = {
 	name: "OpenAI Codex",
 	cacheTtlMs: 60_000,
 	requestTimeoutMs: 8_000,
+	supportsModel: (model) => hasBaseUrlOrigin(model.baseUrl, CODEX_USAGE_URL),
 	async fetch(context): Promise<StatusSnapshot> {
 		const key = await context.getApiKey();
 		if (!key || key === "proxy-managed") {

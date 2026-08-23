@@ -4,6 +4,7 @@ import type {
 	ProviderConfig,
 	ProviderModelConfig,
 } from "@earendil-works/pi-coding-agent";
+import type { OfficialModelMeta } from "./official-pricing.ts";
 
 export type ThinkingLevel = ReturnType<ExtensionAPI["getThinkingLevel"]>;
 
@@ -30,6 +31,14 @@ export interface ModelMetadataStatus {
 export interface StoredCredentialLike {
 	readonly type?: string;
 	readonly teamName?: string;
+}
+
+/** Model-scoped authentication resolved by Pi for one diagnostic request. */
+export interface ProviderRequestAuth {
+	apiKey?: string;
+	headers?: Record<string, string | null>;
+	baseUrl?: string;
+	env?: Record<string, string>;
 }
 
 export interface ModelFieldSources {
@@ -145,6 +154,10 @@ export interface StatusSnapshot {
 export interface StatusContext {
 	fetch: typeof globalThis.fetch;
 	getApiKey: () => Promise<string | undefined>;
+	/** Complete model-scoped request authentication resolved by Pi. */
+	getAuth?: () => Promise<ProviderRequestAuth>;
+	/** Effective model, including any credential-specific base URL. */
+	model?: ActiveModel;
 	/** Optional non-secret credential metadata for provider-specific account labels. */
 	getCredentialMetadata?: () => unknown;
 	/** Optional non-secret credential type ("oauth" vs "api_key") for providers with dual auth modes. */
@@ -159,6 +172,8 @@ export interface StatusAdapter {
 	name: string;
 	cacheTtlMs: number;
 	requestTimeoutMs: number;
+	/** Return false when this account endpoint cannot safely serve the effective model URL. */
+	supportsModel?: (model: ActiveModel) => boolean;
 	fetch(context: StatusContext): Promise<StatusSnapshot>;
 }
 
@@ -179,8 +194,11 @@ export interface ProviderAdapter {
 	/** @internal Draft state shared across isolated Adapter and Host contexts. */
 	registration?: {
 		modelDrafts: ProviderModelDraft[];
-		normalizedModels?: ProviderModel[];
-		modelMetadata?: Record<string, ProviderModelMetadata>;
+		normalizedModels: ProviderModel[];
+		modelMetadata: Record<string, ProviderModelMetadata>;
+		officialPricing: Record<string, OfficialModelMeta>;
+		activeRefreshes: number;
+		deferredRegistration?: () => void;
 	};
 }
 

@@ -199,6 +199,79 @@ test("reads Retry-After from Codex rate-limit errors", async () => {
 	);
 });
 
+test("routes GitHub Copilot status through its credential-specific Enterprise endpoint", async () => {
+	const { createGithubCopilotStatusAdapter } = await import("../status/github-copilot.ts");
+	let requestUrl: string | undefined;
+	const manager = new StatusManager(
+		[createGithubCopilotStatusAdapter(1_000)],
+		async (input, init) => {
+			requestUrl = String(input);
+			assert.equal(new Headers(init?.headers).get("authorization"), "Bearer enterprise-token");
+			return new Response("", { status: 404 });
+		},
+		() => 1_700_000_000_000,
+	);
+	const result = await manager.update(
+		{
+			model: {
+				provider: "github-copilot",
+				id: "gpt-enterprise",
+				baseUrl: "https://api.individual.githubcopilot.com",
+			} as any,
+			modelRegistry: {
+				getApiKeyAndHeaders: async () => ({
+					ok: true as const,
+					apiKey: "enterprise-token",
+					baseUrl: "https://api.enterprise.githubcopilot.com",
+				}),
+				getApiKeyForProvider: async () => "enterprise-token",
+			},
+		} as any,
+		{ force: true },
+	);
+
+	assert.equal(result, "refreshed");
+	assert.equal(requestUrl, "https://api.enterprise.githubcopilot.com/usage");
+});
+
+test("skips an unmappable account endpoint instead of forwarding proxy credentials", async () => {
+	const { createAnthropicStatusAdapter } = await import("../status/anthropic.ts");
+	let requests = 0;
+	const manager = new StatusManager(
+		[createAnthropicStatusAdapter(1_000)],
+		async () => {
+			requests++;
+			return new Response(JSON.stringify({ plan: "Max", subscribedUsage: { weekly: 1, weeklyLimit: 10 } }), {
+				status: 200,
+			});
+		},
+		() => 1_700_000_000_000,
+	);
+	const result = await manager.update(
+		{
+			model: {
+				provider: "anthropic",
+				id: "claude-proxy",
+				baseUrl: "https://api.anthropic.com",
+			} as any,
+			modelRegistry: {
+				getApiKeyAndHeaders: async () => ({
+					ok: true as const,
+					apiKey: "oauth-token",
+					baseUrl: "https://proxy.example.test/anthropic",
+				}),
+				getApiKeyForProvider: async () => "oauth-token",
+			},
+			getCredentialMetadata: () => ({ type: "oauth" }),
+		} as any,
+		{ force: true },
+	);
+
+	assert.equal(result, "skipped");
+	assert.equal(requests, 0);
+	assert.equal(manager.getDiagnostics("anthropic").lastError, undefined);
+});
+
 test("drops a cached status snapshot when the credential changes", async () => {
 	let key = "first-key";
 	const manager = new StatusManager(

@@ -773,6 +773,68 @@ test("Host reapplies official pricing when it re-registers an accepted Provider"
 	assert.equal(pi.providers.get("pricing-provider")?.models[0]?.cost.output, 2);
 });
 
+test("Host defers OpenRouter metadata network access until session_start", async () => {
+	clearPricingCache(OPENROUTER_MODELS_URL);
+	let requests = 0;
+	try {
+		const pi = new TestPi();
+		createPiProviderHost({
+			fetch: async () => {
+				requests++;
+				return new Response(JSON.stringify({ data: [] }), { status: 200 });
+			},
+			officialPricingCacheTtlMs: 0,
+			openRouterMetadataCachePath: "",
+		})(pi as unknown as ExtensionAPI);
+
+		await new Promise((resolve) => setImmediate(resolve));
+		assert.equal(requests, 0);
+
+		const context = createContext(pi, "unused-provider");
+		await pi.emit("session_start", { type: "session_start", reason: "startup" }, context);
+		for (let attempt = 0; attempt < 20 && requests === 0; attempt++) {
+			await new Promise((resolve) => setImmediate(resolve));
+		}
+		assert.equal(requests, 1);
+	} finally {
+		clearPricingCache(OPENROUTER_MODELS_URL);
+	}
+});
+
+test("Host cancels its metadata request during session shutdown", async () => {
+	clearPricingCache(OPENROUTER_MODELS_URL);
+	let requestSignal: AbortSignal | undefined;
+	let signalStarted: (() => void) | undefined;
+	const started = new Promise<void>((resolve) => {
+		signalStarted = resolve;
+	});
+	const fetchFn = (async (_input, init) => {
+		requestSignal = init?.signal ?? undefined;
+		signalStarted?.();
+		return await new Promise<Response>((_resolve, reject) => {
+			requestSignal?.addEventListener("abort", () => reject(requestSignal?.reason), { once: true });
+		});
+	}) as typeof globalThis.fetch;
+	try {
+		const pi = new TestPi();
+		createPiProviderHost({
+			fetch: fetchFn,
+			officialPricingTimeoutMs: 1_000,
+			officialPricingCacheTtlMs: 0,
+			openRouterMetadataCachePath: "",
+		})(pi as unknown as ExtensionAPI);
+		const context = createContext(pi, "unused-provider");
+		await pi.emit("session_start", { type: "session_start", reason: "startup" }, context);
+		await started;
+		assert.equal(requestSignal?.aborted, false);
+
+		await pi.emit("session_shutdown", { type: "session_shutdown", reason: "test" }, context);
+		assert.equal(requestSignal?.aborted, true);
+	} finally {
+		clearPricingCache(OPENROUTER_MODELS_URL);
+	}
+});
+
 test("Host reapplies OpenRouter metadata after a non-blocking refresh", async () => {
 	const root = await mkdtemp(join(tmpdir(), "pi-provider-host-pricing-"));
 	clearPricingCache(OPENROUTER_MODELS_URL);
@@ -1119,22 +1181,23 @@ test("only the first Pi Provider Host installs runtime handlers", async () => {
 
 test("Host does not install a registry after session shutdown cancels readiness", async () => {
 	const pi = new TestPi();
-	createPiProviderHost({
-		officialPricingUrl: "https://shutdown-race.invalid/models",
-		officialPricingTimeoutMs: 20,
-		fetch: async () => await new Promise<Response>(() => {}),
-	})(pi as unknown as ExtensionAPI);
+	let factoryCalls = 0;
 	const factory = defineProviderExtension({
 		id: "shutdown-race-provider",
-		create: () => providerAdapter("shutdown-race-provider"),
+		create: async () => {
+			factoryCalls++;
+			if (factoryCalls > 1) await new Promise((resolve) => setTimeout(resolve, 20));
+			return providerAdapter("shutdown-race-provider");
+		},
 	});
 	await factory(pi as unknown as ExtensionAPI);
+	createPiProviderHost({ enableOfficialPricingFallback: false })(pi as unknown as ExtensionAPI);
 	const context = createContext(pi, "shutdown-race-provider");
+	await pi.emit("session_start", { type: "session_start", reason: "startup" }, context);
 	const pending = pi.commands.get("status").handler("check", context);
 	await new Promise((resolve) => setImmediate(resolve));
 	await pi.emit("session_shutdown", { type: "session_shutdown", reason: "test" }, context);
 	await pending;
-	await new Promise((resolve) => setTimeout(resolve, 30));
 
 	assert.equal(pi.providerCalls.filter((id) => id === "shutdown-race-provider").length, 1);
 });

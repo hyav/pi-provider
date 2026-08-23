@@ -22,6 +22,14 @@ test("does not publish local private provider adapters", () => {
 	assert.ok(!packageJson.files?.includes("pi-provider"));
 });
 
+test("documents and prepares the agentDir adapter cache under extensions/pi-provider", () => {
+	const entrypoint = readFileSync(new URL("../index.ts", import.meta.url), "utf8");
+	assert.match(entrypoint, /<agentDir>\/extensions\/pi-provider/);
+
+	const publishWorkflow = readFileSync(new URL("../.github/workflows/publish.yml", import.meta.url), "utf8");
+	assert.match(publishWorkflow, /cache_dir="\$agent_dir\/extensions\/pi-provider"/);
+});
+
 test("declares Pi-bundled runtime packages as open peers", () => {
 	assert.deepEqual(packageJson.peerDependencies, {
 		"@earendil-works/pi-coding-agent": "*",

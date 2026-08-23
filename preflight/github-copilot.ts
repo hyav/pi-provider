@@ -1,7 +1,16 @@
 import type { PreflightAdapter } from "@hyav/pi-provider";
-import { definePreflightExtension, ProviderDataError, parseRetryAfter } from "@hyav/pi-provider";
+import {
+	appendBaseUrlPath,
+	authDefinesHeader,
+	definePreflightExtension,
+	getContextAuth,
+	mergeDiagnosticHeaders,
+	ProviderDataError,
+	parseRetryAfter,
+} from "@hyav/pi-provider";
 
-export const COPILOT_MODELS_URL = "https://api.individual.githubcopilot.com/models";
+export const COPILOT_BASE_URL = "https://api.individual.githubcopilot.com";
+export const COPILOT_MODELS_URL = `${COPILOT_BASE_URL}/models`;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -14,17 +23,21 @@ export const githubCopilotPreflightAdapter: PreflightAdapter = {
 	cacheTtlMs: 30_000,
 	requestTimeoutMs: 8_000,
 	async fetch(context) {
-		const apiKey = await context.getApiKey();
+		const auth = await getContextAuth(context);
+		const apiKey = auth.apiKey;
 		if (!apiKey || apiKey === "proxy-managed") {
 			return { passed: false, checks: ["auth"], updatedAt: context.now() };
 		}
-		const response = await context.fetch(COPILOT_MODELS_URL, {
-			headers: {
-				Accept: "application/json",
-				"Accept-Encoding": "identity",
-				Authorization: `Bearer ${apiKey}`,
-				"User-Agent": "@hyav/pi-provider",
-			},
+		const url = appendBaseUrlPath(context.model.baseUrl ?? auth.baseUrl, "models", COPILOT_BASE_URL);
+		if (!url) throw new ProviderDataError("GitHub Copilot model endpoint is unavailable", "unsupported");
+		const headers = mergeDiagnosticHeaders(auth, {
+			Accept: "application/json",
+			"Accept-Encoding": "identity",
+			"User-Agent": "@hyav/pi-provider",
+		});
+		if (!authDefinesHeader(auth, "Authorization")) headers.set("Authorization", `Bearer ${apiKey}`);
+		const response = await context.fetch(url, {
+			headers,
 			signal: context.signal,
 		});
 		if (!response.ok) {

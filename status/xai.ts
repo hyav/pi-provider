@@ -1,5 +1,5 @@
 import type { StatusAdapter, StatusEntry, StatusSnapshot } from "@hyav/pi-provider";
-import { defineStatusExtension, ProviderDataError, parseRetryAfter } from "@hyav/pi-provider";
+import { defineStatusExtension, hasBaseUrlOrigin, ProviderDataError, parseRetryAfter } from "@hyav/pi-provider";
 import { parseRateLimitWindows } from "../core/ratelimit-headers.ts";
 
 export const XAI_MODELS_URL = "https://api.x.ai/v1/models";
@@ -21,6 +21,7 @@ export const xaiStatusAdapter: StatusAdapter = {
 	name: "xAI",
 	cacheTtlMs: 60_000,
 	requestTimeoutMs: 8_000,
+	supportsModel: (model) => hasBaseUrlOrigin(model.baseUrl, XAI_MODELS_URL),
 	async fetch(context): Promise<StatusSnapshot> {
 		const key = await context.getApiKey();
 		if (!key || key === "proxy-managed") {

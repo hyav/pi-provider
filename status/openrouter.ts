@@ -1,5 +1,5 @@
 import type { StatusAdapter, StatusEntry, StatusSnapshot } from "@hyav/pi-provider";
-import { defineStatusExtension, ProviderDataError, parseRetryAfter } from "@hyav/pi-provider";
+import { defineStatusExtension, hasBaseUrlOrigin, ProviderDataError, parseRetryAfter } from "@hyav/pi-provider";
 
 export const OPENROUTER_KEY_URL = "https://openrouter.ai/api/v1/auth/key";
 export const OPENROUTER_CREDITS_URL = "https://openrouter.ai/api/v1/credits";
@@ -109,6 +109,7 @@ export const openRouterStatusAdapter: StatusAdapter = {
 	name: "OpenRouter",
 	cacheTtlMs: 60_000,
 	requestTimeoutMs: 8_000,
+	supportsModel: (model) => hasBaseUrlOrigin(model.baseUrl, OPENROUTER_KEY_URL),
 	async fetch(context): Promise<StatusSnapshot> {
 		const key = await context.getApiKey();
 		if (!key || key === "proxy-managed") {

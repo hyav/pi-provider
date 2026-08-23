@@ -228,7 +228,8 @@ export class LiveCheckManager {
 			},
 		};
 		throwIfAborted(signal);
-		const stream = provider.streamSimple(ctx.model, context, options);
+		const requestModel = auth.baseUrl ? { ...ctx.model, baseUrl: auth.baseUrl } : ctx.model;
+		const stream = provider.streamSimple(requestModel, context, options);
 		let completed = false;
 		for await (const event of stream) {
 			if (event.type === "error") {

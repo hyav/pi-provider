@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { prepareProviderRegistration } from "../core/provider-registration.ts";
+import { prepareProviderRegistration, refreshProviderRegistrations } from "../core/provider-registration.ts";
 import { getDefaultPiProviderDependencies } from "../core/runtime-config.ts";
 import type { ProviderAdapter } from "../core/types.ts";
 
@@ -317,6 +317,113 @@ test("allows a dynamic catalog refresh with an environment or stored credential"
 		if (previous === undefined) delete process.env[environmentName];
 		else process.env[environmentName] = previous;
 	}
+});
+
+test("rejects unsafe and oversized dynamic model catalogs without replacing the active catalog", async () => {
+	const unsafeCatalogs = [
+		[{ id: "unsafe-\u001b[31m-model" }],
+		[{ id: "safe-model", name: "unsafe-\u009b31m-name" }],
+		Array.from({ length: 4_097 }, (_, index) => ({ id: `model-${index}` })),
+	];
+
+	for (const unsafeCatalog of unsafeCatalogs) {
+		const adapter = providerAdapter();
+		adapter.provider.refreshModels = async () => unsafeCatalog;
+		const registered = prepareProviderRegistration(adapter, getDefaultPiProviderDependencies());
+
+		await assert.rejects(
+			async () =>
+				await registered.refreshModels?.({
+					allowNetwork: true,
+					credential: { type: "api_key", key: "stored-key" },
+				} as any),
+			/unsafe|control|too many|safe text|model ID/i,
+		);
+		assert.deepEqual(
+			registered.models?.map(({ id }) => id),
+			["model-alpha"],
+		);
+	}
+});
+
+test("shares registration state when pricing is reapplied during a dynamic refresh", async () => {
+	const adapter = providerAdapter();
+	adapter.pricing = undefined;
+	let signalStarted: (() => void) | undefined;
+	let release: (() => void) | undefined;
+	const started = new Promise<void>((resolve) => {
+		signalStarted = resolve;
+	});
+	adapter.provider.refreshModels = async () => {
+		signalStarted?.();
+		await new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		return [{ id: "dynamic-model" }];
+	};
+
+	const firstRegistration = prepareProviderRegistration(adapter, getDefaultPiProviderDependencies());
+	const refresh = firstRegistration.refreshModels?.({
+		allowNetwork: true,
+		credential: { type: "api_key", key: "stored-key" },
+	} as any);
+	await started;
+
+	const latestRegistration = prepareProviderRegistration(adapter, getDefaultPiProviderDependencies(), {
+		"dynamic-model": { cost: { input: 1, output: 2, cacheRead: 0.1, cacheWrite: 0.2 } },
+	});
+	release?.();
+	await refresh;
+
+	assert.equal(latestRegistration.models?.[0]?.id, "dynamic-model");
+	assert.deepEqual(latestRegistration.models?.[0]?.cost, {
+		input: 1,
+		output: 2,
+		cacheRead: 0.1,
+		cacheWrite: 0.2,
+	});
+});
+
+test("defers pricing re-registration until an active catalog refresh settles", async () => {
+	const adapter = providerAdapter();
+	adapter.pricing = undefined;
+	let signalStarted: (() => void) | undefined;
+	let release: (() => void) | undefined;
+	const started = new Promise<void>((resolve) => {
+		signalStarted = resolve;
+	});
+	adapter.provider.refreshModels = async () => {
+		signalStarted?.();
+		await new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		return [{ id: "dynamic-model" }];
+	};
+	const runtime = getDefaultPiProviderDependencies();
+	const registrations: any[] = [];
+	const pi = {
+		registerProvider(_id: string, config: unknown) {
+			registrations.push(config);
+		},
+	};
+	refreshProviderRegistrations(pi as any, [adapter], runtime, {});
+	const refresh = registrations[0].refreshModels({
+		allowNetwork: true,
+		credential: { type: "api_key", key: "stored-key" },
+	});
+	await started;
+
+	refreshProviderRegistrations(pi as any, [adapter], runtime, {
+		"dynamic-model": { cost: { input: 1, output: 2, cacheRead: 0.1, cacheWrite: 0.2 } },
+	});
+	assert.equal(registrations.length, 1);
+
+	release?.();
+	await refresh;
+	await new Promise((resolve) => setImmediate(resolve));
+	assert.equal(registrations.length, 2);
+	assert.equal(registrations[1].models[0].id, "dynamic-model");
+	assert.equal(registrations[1].models[0].cost.input, 1);
 });
 
 test("registers a discounted reference price and keeps pricing provenance", () => {

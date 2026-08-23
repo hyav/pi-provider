@@ -1,5 +1,5 @@
 import type { PreflightAdapter } from "@hyav/pi-provider";
-import { definePreflightExtension, ProviderDataError, parseRetryAfter } from "@hyav/pi-provider";
+import { definePreflightExtension, hasBaseUrlOrigin, ProviderDataError, parseRetryAfter } from "@hyav/pi-provider";
 import { GROQ_MODELS_URL } from "../status/groq.ts";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -12,6 +12,7 @@ export const groqPreflightAdapter: PreflightAdapter = {
 	name: "Groq",
 	cacheTtlMs: 30_000,
 	requestTimeoutMs: 8_000,
+	supportsModel: (model) => hasBaseUrlOrigin(model.baseUrl, GROQ_MODELS_URL),
 	async fetch(context) {
 		const apiKey = await context.getApiKey();
 		if (!apiKey || apiKey === "proxy-managed") {

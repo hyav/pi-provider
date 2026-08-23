@@ -1,5 +1,5 @@
 import type { PreflightAdapter } from "@hyav/pi-provider";
-import { definePreflightExtension, ProviderDataError, parseRetryAfter } from "@hyav/pi-provider";
+import { definePreflightExtension, hasBaseUrlOrigin, ProviderDataError, parseRetryAfter } from "@hyav/pi-provider";
 
 export const DEEPSEEK_MODELS_URL = "https://api.deepseek.com/models";
 
@@ -13,6 +13,7 @@ export const deepSeekPreflightAdapter: PreflightAdapter = {
 	name: "DeepSeek",
 	cacheTtlMs: 30_000,
 	requestTimeoutMs: 8_000,
+	supportsModel: (model) => hasBaseUrlOrigin(model.baseUrl, DEEPSEEK_MODELS_URL),
 	async fetch(context) {
 		const apiKey = await context.getApiKey();
 		if (!apiKey || apiKey === "proxy-managed") {

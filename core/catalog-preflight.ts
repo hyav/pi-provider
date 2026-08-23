@@ -1,5 +1,6 @@
 /** Shared helpers for Provider-agnostic, OpenAI-style model-catalog checks. */
 
+import { authDefinesHeader, getContextAuth, hasBaseUrlOrigin, mergeDiagnosticHeaders } from "./diagnostic-auth.ts";
 import { ProviderDataError } from "./errors.ts";
 import type { PreflightAdapter } from "./preflight-manager.ts";
 import { parseRetryAfter } from "./retry-after.ts";
@@ -42,25 +43,36 @@ export function createCatalogPreflightAdapter(
 		cacheTtlMs: 30_000,
 		requestTimeoutMs,
 		async fetch(context) {
-			const apiKey = await context.getApiKey();
+			const auth = await getContextAuth(context);
+			const apiKey = auth.apiKey;
 			const credential = context.getCredentialType
 				? await context.getCredentialType().catch(() => undefined)
 				: undefined;
-			const headers: Record<string, string> = {
+			const headers = mergeDiagnosticHeaders(auth, {
 				Accept: "application/json",
 				"Accept-Encoding": "identity",
 				...(config.headers ?? {}),
-			};
+			});
 			if (apiKey && apiKey !== "proxy-managed") {
 				if (config.authHeaders) {
-					Object.assign(headers, config.authHeaders(apiKey, credential));
+					for (const [name, value] of Object.entries(config.authHeaders(apiKey, credential))) {
+						if (!authDefinesHeader(auth, name)) headers.set(name, value);
+					}
 				} else if (config.keyHeader) {
-					headers[config.keyHeader] = apiKey;
-				} else {
-					headers.Authorization = `Bearer ${apiKey}`;
+					if (!authDefinesHeader(auth, config.keyHeader)) headers.set(config.keyHeader, apiKey);
+				} else if (!authDefinesHeader(auth, "Authorization")) {
+					headers.set("Authorization", `Bearer ${apiKey}`);
 				}
 			}
-			const response = await context.fetch(config.modelsUrl, { headers, signal: context.signal });
+			const effectiveBaseUrl = context.model.baseUrl ?? auth.baseUrl;
+			const modelsUrl =
+				effectiveBaseUrl === undefined || hasBaseUrlOrigin(effectiveBaseUrl, config.modelsUrl)
+					? config.modelsUrl
+					: workspaceModelsUrl(effectiveBaseUrl);
+			if (!modelsUrl) {
+				throw new ProviderDataError(`${config.name} model catalog is unavailable for this endpoint`, "unsupported");
+			}
+			const response = await context.fetch(modelsUrl, { headers, signal: context.signal });
 			if (!response.ok) {
 				throw new ProviderDataError(
 					`${config.name} preflight failed: HTTP ${response.status}`,

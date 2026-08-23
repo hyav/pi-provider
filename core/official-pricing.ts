@@ -48,6 +48,10 @@ export interface OfficialPricingFetchOptions {
 	background?: boolean;
 	/** Observe the completed background snapshot without delaying the initial caller. */
 	onBackgroundRefresh?: (snapshot: Record<string, OfficialModelMeta>) => void;
+	/** Read process/disk cache only and never start network access. */
+	allowNetwork?: boolean;
+	/** Cancel network access owned by the caller's lifecycle. */
+	signal?: AbortSignal;
 }
 
 interface PricingCacheEntry {
@@ -68,7 +72,7 @@ const pricingRequests = new Map<string, Promise<Record<string, OfficialModelMeta
 
 /** Default cache for OpenRouter metadata, not Pi's native model catalog. */
 export function getDefaultOpenRouterMetadataCachePath(agentDir: string): string {
-	return join(agentDir, "extensions", "pi-provider", "openrouter-model-metadata.json");
+	return agentDir.trim() === "" ? "" : join(agentDir, "extensions", "pi-provider", "openrouter-model-metadata.json");
 }
 
 function cloneCost(cost: ProviderCost): ProviderCost {
@@ -568,6 +572,7 @@ async function fetchOfficialPricingUncoalesced(
 	maxStaleMs: number,
 	now: () => number,
 	cachePath?: string,
+	externalSignal?: AbortSignal,
 ): Promise<Record<string, OfficialModelMeta>> {
 	const persisted = await readPersistedPricingCache(cachePath, pricingUrl);
 	const allowPersistedStale = persisted !== undefined;
@@ -581,12 +586,16 @@ async function fetchOfficialPricingUncoalesced(
 	}
 
 	try {
-		const result = await withDeadline(async (signal) => {
-			const response = await fetchFn(pricingUrl, { signal });
-			if (!response.ok) return { ok: false as const };
-			const payload = await response.json();
-			return { ok: true as const, parsed: parseOpenRouterModels(payload) };
-		}, timeoutMs);
+		const result = await withDeadline(
+			async (signal) => {
+				const response = await fetchFn(pricingUrl, { signal });
+				if (!response.ok) return { ok: false as const };
+				const payload = await response.json();
+				return { ok: true as const, parsed: parseOpenRouterModels(payload) };
+			},
+			timeoutMs,
+			externalSignal,
+		);
 		if (!result.ok) return staleCache(pricingUrl, now(), maxStaleMs, allowPersistedStale);
 		if (Object.keys(result.parsed).length > 0) {
 			const updatedAt = now();
@@ -663,15 +672,6 @@ export async function fetchOfficialPricing(
 	const cachedAge = getPricingCacheAge(pricingUrl, currentTime);
 	if (cachedAge !== undefined && cachedAge <= cacheTtlMs) return getPricingCache(pricingUrl);
 
-	const existing = pricingRequests.get(pricingUrl);
-	if (existing) {
-		if (options.background === true) {
-			observeBackgroundRefresh(existing, options.onBackgroundRefresh);
-			return getPricingCache(pricingUrl);
-		}
-		return existing;
-	}
-
 	if (options.cachePath) {
 		const persisted = await readPersistedPricingCache(options.cachePath, pricingUrl);
 		if (persisted !== undefined) {
@@ -684,7 +684,29 @@ export async function fetchOfficialPricing(
 		}
 	}
 
-	const request = startPricingRequest(fetchFn, pricingUrl, timeoutMs, cacheTtlMs, maxStaleMs, now, options.cachePath);
+	if (options.allowNetwork === false) return getPricingCache(pricingUrl);
+
+	const existing = options.signal === undefined ? pricingRequests.get(pricingUrl) : undefined;
+	if (existing) {
+		if (options.background === true) {
+			observeBackgroundRefresh(existing, options.onBackgroundRefresh);
+			return getPricingCache(pricingUrl);
+		}
+		return existing;
+	}
+
+	const request = options.signal
+		? fetchOfficialPricingUncoalesced(
+				fetchFn,
+				pricingUrl,
+				timeoutMs,
+				cacheTtlMs,
+				maxStaleMs,
+				now,
+				options.cachePath,
+				options.signal,
+			)
+		: startPricingRequest(fetchFn, pricingUrl, timeoutMs, cacheTtlMs, maxStaleMs, now, options.cachePath);
 	if (options.background === true) {
 		observeBackgroundRefresh(request, options.onBackgroundRefresh);
 		void request.catch(() => undefined);

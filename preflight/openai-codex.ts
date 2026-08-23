@@ -1,5 +1,5 @@
 import type { PreflightAdapter } from "@hyav/pi-provider";
-import { definePreflightExtension, ProviderDataError, parseRetryAfter } from "@hyav/pi-provider";
+import { definePreflightExtension, hasBaseUrlOrigin, ProviderDataError, parseRetryAfter } from "@hyav/pi-provider";
 import { extractCodexAccountId } from "../status/openai-codex.ts";
 
 export const CODEX_MODELS_URL = "https://chatgpt.com/backend-api/codex/models";
@@ -28,6 +28,7 @@ export const openAICodexPreflightAdapter: PreflightAdapter = {
 	name: "OpenAI Codex",
 	cacheTtlMs: 30_000,
 	requestTimeoutMs: 8_000,
+	supportsModel: (model) => hasBaseUrlOrigin(model.baseUrl, CODEX_MODELS_URL),
 	async fetch(context) {
 		const apiKey = await context.getApiKey();
 		if (!apiKey || apiKey === "proxy-managed") {

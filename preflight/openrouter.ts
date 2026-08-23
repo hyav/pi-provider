@@ -1,5 +1,5 @@
 import type { PreflightAdapter } from "@hyav/pi-provider";
-import { definePreflightExtension, ProviderDataError, parseRetryAfter } from "@hyav/pi-provider";
+import { definePreflightExtension, hasBaseUrlOrigin, ProviderDataError, parseRetryAfter } from "@hyav/pi-provider";
 import { OPENROUTER_KEY_URL } from "../status/openrouter.ts";
 
 export const OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models";
@@ -79,6 +79,7 @@ export const openRouterPreflightAdapter: PreflightAdapter = {
 	name: "OpenRouter",
 	cacheTtlMs: 30_000,
 	requestTimeoutMs: 8_000,
+	supportsModel: (model) => hasBaseUrlOrigin(model.baseUrl, OPENROUTER_MODELS_URL),
 	async fetch(context) {
 		const modelIds = await collectModelIds(context);
 		const apiKey = await context.getApiKey();
