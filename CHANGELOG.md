@@ -2,6 +2,10 @@
 
 This file is the authoritative user-facing release history for `@hyav/pi-provider`.
 
+## 0.1.6 - 2026-08-24
+
+- Prevent Charm Hyper model-refresh warnings when no credentials are configured by registering OAuth-capable Providers without unresolved optional environment API keys and clearing stale API-key configuration after `/reload`; configured environment and stored API keys remain supported.
+
 ## 0.1.5 - 2026-08-24
 
 - Skip network model-catalog refreshes for Providers whose environment-backed API key is not configured and which have no resolved stored credential, retaining cached models without Pi refresh warnings.
