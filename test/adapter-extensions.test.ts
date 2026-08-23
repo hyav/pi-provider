@@ -769,6 +769,9 @@ test("Host reapplies official pricing when it re-registers an accepted Provider"
 	const context = createContext(pi, "pricing-provider", "pricing-model");
 	await pi.emit("session_start", { type: "session_start", reason: "startup" }, context);
 	await pi.commands.get("status").handler("", context);
+	for (let attempt = 0; attempt < 20 && pi.providers.get("pricing-provider")?.models[0]?.cost.input !== 1; attempt++) {
+		await new Promise((resolve) => setImmediate(resolve));
+	}
 	assert.equal(pi.providers.get("pricing-provider")?.models[0]?.cost.input, 1);
 	assert.equal(pi.providers.get("pricing-provider")?.models[0]?.cost.output, 2);
 });
