@@ -2,9 +2,15 @@
 
 This file is the authoritative user-facing release history for `@hyav/pi-provider`.
 
-## Unreleased
+## 0.1.5 - 2026-08-24
 
 - Skip network model-catalog refreshes for Providers whose environment-backed API key is not configured and which have no resolved stored credential, retaining cached models without Pi refresh warnings.
+- Apply bounded validation to initial, cached, and refreshed model catalogs, including model-count, field-length, and control-character checks.
+- Route Status, Preflight, and Live Check requests through each model credential's effective headers and base URL, and skip account endpoints that cannot be mapped without risking credential disclosure.
+- Defer official metadata network refreshes until session startup, cancel them during shutdown, and preserve refreshed dynamic catalogs when pricing updates race with model discovery.
+- Derive metadata cache paths after resolving the agent directory and disable persistence when no agent directory is configured.
+- Report the Vercel AI Gateway public catalog check without claiming it verifies authentication.
+- Export diagnostic authentication helpers through the public Adapter API so installed user Adapters remain independently loadable.
 
 ## 0.1.4 - 2026-08-21
 
