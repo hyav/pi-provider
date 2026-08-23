@@ -2,6 +2,10 @@
 
 This file is the authoritative user-facing release history for `@hyav/pi-provider`.
 
+## 0.1.7 - 2026-08-24
+
+- Refresh the active model catalog dynamically on `/status refresh` and `/status check` by delegating to Pi's model registry with forced network revalidation, keeping the displayed model catalog and model counts up to date without requiring `/reload`.
+
 ## 0.1.6 - 2026-08-24
 
 - Prevent Charm Hyper model-refresh warnings when no credentials are configured by registering OAuth-capable Providers without unresolved optional environment API keys and clearing stale API-key configuration after `/reload`; configured environment and stored API keys remain supported.
