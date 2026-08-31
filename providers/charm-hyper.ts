@@ -21,17 +21,6 @@ export { HYPER_BASE_URL, HYPER_USER_AGENT } from "./charm-hyper/constants.ts";
 export const HYPER_PROVIDER_URL = "https://hyper.charm.land/v1/provider";
 export const HYPER_MODELS_URL = "https://hyper.charm.land/v1/models";
 export const HYPER_MODEL_CATALOG_TTL_MS = 4 * 60 * 60 * 1_000;
-const zeroCost = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
-
-const officialCostFallbacks: Partial<Record<string, ProviderModel["cost"]>> = {
-	"deepseek-v4-flash": { input: 0.14, output: 0.28, cacheRead: 0.0028, cacheWrite: 0 },
-	"deepseek-v4-pro": { input: 0.435, output: 0.87, cacheRead: 0.003625, cacheWrite: 0 },
-	"glm-5": { input: 1, output: 3.2, cacheRead: 0, cacheWrite: 0 },
-	"glm-5.1": { input: 1.4, output: 4.4, cacheRead: 0.26, cacheWrite: 0 },
-	"kimi-k2.5": { input: 0.6, output: 3, cacheRead: 0.1, cacheWrite: 0 },
-	"kimi-k2.6": { input: 0.95, output: 4, cacheRead: 0.16, cacheWrite: 0 },
-	"mistral-large-instruct-2411": { input: 2, output: 6, cacheRead: 0.2, cacheWrite: 0 },
-};
 
 const thinkingLevels = new Set<ThinkingLevel>(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
 const baseHyperCompat: NonNullable<ProviderModel["compat"]> = {
@@ -50,21 +39,6 @@ const onOffThinkingLevelMap: NonNullable<ProviderModel["thinkingLevelMap"]> = {
 	max: "max",
 };
 
-const modelOverrides: Record<string, Partial<ProviderModelDraft>> = {
-	"qwen3-coder-480b-a35b-instruct-int4-mixed-ar": { reasoning: false },
-	"qwen3-next-80b-a3b-instruct": { reasoning: false },
-	"gpt-oss-120b": {
-		thinkingLevelMap: {
-			minimal: null,
-			low: "low",
-			medium: "medium",
-			high: "high",
-			xhigh: "high",
-		},
-		compat: { supportsReasoningEffort: true },
-	},
-};
-
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return value !== null && typeof value === "object" && !Array.isArray(value);
 }
@@ -75,63 +49,6 @@ function isPositiveInteger(value: unknown): value is number {
 
 function isFiniteNonNegative(value: unknown): value is number {
 	return typeof value === "number" && Number.isFinite(value) && value >= 0;
-}
-
-function costFallbackFor(id: string): ProviderModel["cost"] {
-	return { ...(officialCostFallbacks[id] ?? zeroCost) };
-}
-
-function fallbackModel(
-	id: string,
-	name: string,
-	contextWindow: number,
-	overrides: Partial<ProviderModelDraft> = {},
-): ProviderModelDraft {
-	const { compat: overrideCompat, ...rest } = overrides;
-	return {
-		id,
-		name,
-		reasoning: true,
-		input: ["text", "image"],
-		contextWindow,
-		maxTokens: Math.floor(contextWindow / 10),
-		cost: costFallbackFor(id),
-		pricingSource: "fallback",
-		headers: { ...hyperModelHeaders },
-		compat: { ...baseHyperCompat, ...overrideCompat },
-		...rest,
-	};
-}
-
-export function getHyperFallbackModels(): ProviderModelDraft[] {
-	return [
-		fallbackModel("deepseek-v4-flash", "DeepSeek V4 Flash", 1_048_576),
-		fallbackModel("deepseek-v4-pro", "DeepSeek V4 Pro", 1_048_576),
-		fallbackModel("gemma-4-26b-a4b-it", "Gemma 4 26B A4B", 32_768, { input: ["text"] }),
-		fallbackModel("glm-5", "GLM-5", 202_752),
-		fallbackModel("glm-5.1", "GLM-5.1", 202_752),
-		fallbackModel("gpt-oss-120b", "GPT-OSS-120B", 131_072, {
-			input: ["text"],
-			thinkingLevelMap: { minimal: null, low: "low", medium: "medium", high: "high", xhigh: "high" },
-			compat: { supportsReasoningEffort: true },
-		}),
-		fallbackModel("kimi-k2.5", "Kimi K2.5", 262_144),
-		fallbackModel("kimi-k2.6", "Kimi K2.6", 32_768),
-		fallbackModel("llama-3.3-70b-instruct", "Llama 3.3 70B Instruct", 128_000, { input: ["text"] }),
-		fallbackModel("llama-4-maverick-17b-128e-instruct-fp8", "Llama 4 Maverick 17B 128E", 430_000),
-		fallbackModel("mistral-large-instruct-2411", "Mistral Large Instruct 2411", 128_000, {
-			reasoning: false,
-			input: ["text"],
-		}),
-		fallbackModel("qwen3-coder-480b-a35b-instruct-int4-mixed-ar", "Qwen3 Coder 480B INT4", 106_000, {
-			reasoning: false,
-			input: ["text"],
-		}),
-		fallbackModel("qwen3-next-80b-a3b-instruct", "Qwen3 Next 80B A3B", 262_144, {
-			reasoning: false,
-			input: ["text"],
-		}),
-	];
 }
 
 function mapHyperPricing(value: unknown): ProviderModel["cost"] | undefined {
@@ -160,16 +77,6 @@ function buildThinkingLevelMap(levels: readonly string[]): NonNullable<ProviderM
 		high: available.has("high") ? "high" : null,
 		xhigh: available.has("xhigh") ? "xhigh" : null,
 		max: available.has("max") ? "max" : null,
-	};
-}
-
-function applyModelOverride(model: ProviderModelDraft): ProviderModelDraft {
-	const override = modelOverrides[model.id];
-	if (override === undefined) return model;
-	return {
-		...model,
-		...override,
-		...(override.compat ? { compat: { ...(model.compat ?? {}), ...override.compat } } : {}),
 	};
 }
 
@@ -238,7 +145,7 @@ function parseCurrentHyperModel(value: unknown): ProviderModelDraft | undefined 
 		compat: { ...baseHyperCompat, supportsReasoningEffort: reportedReasoningLevels.length > 0 },
 		...(thinkingLevelMap ? { thinkingLevelMap } : {}),
 	};
-	return applyModelOverride(mapped);
+	return mapped;
 }
 
 function parseCurrentHyperModels(payload: Record<string, unknown>): ProviderModelDraft[] | undefined {
@@ -248,7 +155,7 @@ function parseCurrentHyperModels(payload: Record<string, unknown>): ProviderMode
 	const seenIds = new Set<string>();
 	for (const value of payload.models) {
 		const model = parseCurrentHyperModel(value);
-		if (model === undefined) return [];
+		if (model === undefined) continue;
 		const normalizedId = model.id.toLowerCase();
 		if (seenIds.has(normalizedId)) continue;
 		seenIds.add(normalizedId);
@@ -310,11 +217,10 @@ function parseLegacyHyperModels(payload: Record<string, unknown>): ProviderModel
 			headers: { ...hyperModelHeaders },
 			...(contextWindow !== undefined ? { contextWindow } : {}),
 			...(maxTokens !== undefined ? { maxTokens } : {}),
-			cost: cost ?? costFallbackFor(id),
-			pricingSource: cost ? "provider" : "fallback",
+			...(cost ? { cost, pricingSource: "provider" as const } : {}),
 			compat: { ...baseHyperCompat, supportsReasoningEffort },
 		};
-		models.push(applyModelOverride(mapped));
+		models.push(mapped);
 		seenIds.add(normalizedId);
 	}
 	return models;
@@ -435,11 +341,11 @@ export function createCharmHyperAdapter(
 	discoveryTimeoutMs: number,
 	now: () => number = Date.now,
 ): ProviderAdapter {
-	let models = getHyperFallbackModels();
+	let models: ProviderModelDraft[] = [];
 	let lastRefreshAt: number | undefined;
 	let lastCatalogUpdatedAt: number | undefined;
 	let inFlightRefresh: { signal: AbortSignal; request: Promise<ProviderModelDraft[]> } | undefined;
-	const catalog: ModelCatalogStatus = { source: "fallback", modelCount: models.length };
+	const catalog: ModelCatalogStatus = { source: "empty", modelCount: 0 };
 	let provider: ProviderAdapter["provider"];
 
 	const publishModels = (
@@ -467,7 +373,7 @@ export function createCharmHyperAdapter(
 		try {
 			await context.publish({
 				update: () => {
-					publishModels(restoredModels, "live", checkedAt);
+					publishModels(restoredModels, "cached", checkedAt);
 					if (checkedAt !== undefined) lastRefreshAt = checkedAt;
 				},
 			});

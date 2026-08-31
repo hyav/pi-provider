@@ -82,8 +82,8 @@ import { defineProviderExtension } from "@hyav/pi-provider";
 export default defineProviderExtension({
   id: "example",
   create: ({ fetch, now, modelDiscoveryTimeoutMs }) => {
-    // Return a synchronously usable fallback/cached catalog during factory execution.
-    // Do not block extension startup on remote network calls.
+    // Return the last online snapshot or an explicit static fallback synchronously.
+    // Use an empty catalog when neither exists; never block startup on network access.
     return createExampleProvider(fetch, modelDiscoveryTimeoutMs, now);
   },
 });

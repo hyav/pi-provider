@@ -112,7 +112,7 @@ export type ProviderDefinition = Omit<ProviderConfig, "models" | "refreshModels"
 	refreshModels?: (context: ProviderRefreshContext) => Promise<ProviderModelDraft[]>;
 };
 
-export type ModelCatalogSource = "static" | "live" | "fallback";
+export type ModelCatalogSource = "static" | "live" | "cached" | "fallback" | "empty";
 
 export interface ModelCatalogStatus {
 	source: ModelCatalogSource;

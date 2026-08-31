@@ -147,7 +147,9 @@ export function validateProviderAdapter(adapter: unknown): asserts adapter is Pr
 		if (
 			adapter.catalog.source !== "static" &&
 			adapter.catalog.source !== "live" &&
-			adapter.catalog.source !== "fallback"
+			adapter.catalog.source !== "cached" &&
+			adapter.catalog.source !== "fallback" &&
+			adapter.catalog.source !== "empty"
 		) {
 			throw new Error(`Provider ${adapter.id} has invalid catalog source`);
 		}

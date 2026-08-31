@@ -5,7 +5,6 @@ import { resolvePiProviderDependencies } from "../core/runtime-config.ts";
 import type { ProviderRefreshContext } from "../core/types.ts";
 import {
 	createCharmHyperAdapter,
-	getHyperFallbackModels,
 	HYPER_MODEL_CATALOG_TTL_MS,
 	HYPER_MODELS_URL,
 	HYPER_PROVIDER_URL,
@@ -25,7 +24,7 @@ function refreshContext(overrides: Partial<ProviderRefreshContext> = {}): Provid
 	return { ...base, ...overrides };
 }
 
-test("applies Charm Hyper model-specific compatibility overrides", () => {
+test("does not apply hardcoded model-specific overrides", () => {
 	const models = parseHyperModels({
 		object: "list",
 		data: [
@@ -46,20 +45,16 @@ test("applies Charm Hyper model-specific compatibility overrides", () => {
 		],
 	});
 
-	assert.equal(models[0].reasoning, false);
-	assert.equal(models[1].reasoning, false);
+	assert.equal(models[0].reasoning, true);
+	assert.equal(models[1].reasoning, true);
 	assert.deepEqual(models[2].thinkingLevelMap, {
+		off: null,
 		minimal: null,
 		low: "low",
 		medium: "medium",
 		high: "high",
-		xhigh: "high",
-	});
-	assert.deepEqual(models[2].compat, {
-		supportsStore: false,
-		supportsReasoningEffort: true,
-		thinkingFormat: "deepseek",
-		maxTokensField: "max_tokens",
+		xhigh: null,
+		max: null,
 	});
 });
 
@@ -176,7 +171,7 @@ test("maps reasoning-only current Hyper models to an on/off thinking mode", () =
 	assert.equal((model.compat as { supportsReasoningEffort?: boolean } | undefined)?.supportsReasoningEffort, false);
 });
 
-test("rejects a current Hyper catalog when required metadata is malformed", () => {
+test("skips malformed current Hyper models while retaining valid entries", () => {
 	assert.deepEqual(
 		parseHyperModels({
 			models: [
@@ -193,8 +188,8 @@ test("rejects a current Hyper catalog when required metadata is malformed", () =
 				},
 				{ id: "invalid-model", name: "Invalid Model", can_reason: true },
 			],
-		}),
-		[],
+		}).map(({ id }) => id),
+		["valid-model"],
 	);
 });
 
@@ -277,8 +272,8 @@ test("sanitizes malformed optional capabilities, efforts, and pricing", () => {
 		xhigh: null,
 		max: null,
 	});
-	assert.deepEqual(model.cost, { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
-	assert.equal(model.pricingSource, "fallback");
+	assert.equal(model.cost, undefined);
+	assert.equal(model.pricingSource, undefined);
 });
 
 test("rejects malformed legacy Hyper pricing instead of treating it as provider cost", () => {
@@ -291,8 +286,8 @@ test("rejects malformed legacy Hyper pricing instead of treating it as provider 
 		],
 	});
 
-	assert.deepEqual(model.cost, { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
-	assert.equal(model.pricingSource, "fallback");
+	assert.equal(model.cost, undefined);
+	assert.equal(model.pricingSource, undefined);
 });
 
 test("retains native OAuth when Charm Hyper is registered", () => {
@@ -309,7 +304,7 @@ test("retains native OAuth when Charm Hyper is registered", () => {
 	assert.equal(typeof registered.oauth?.getApiKey, "function");
 });
 
-test("creates a fallback catalog without waiting for model discovery", () => {
+test("starts with an empty catalog without waiting for model discovery", () => {
 	let requests = 0;
 	const adapter = createCharmHyperAdapter(async () => {
 		requests++;
@@ -317,8 +312,8 @@ test("creates a fallback catalog without waiting for model discovery", () => {
 	}, 5);
 
 	assert.equal(requests, 0);
-	assert.equal(adapter.catalog?.source, "fallback");
-	assert.equal(adapter.provider.models.length, getHyperFallbackModels().length);
+	assert.equal(adapter.catalog?.source, "empty");
+	assert.equal(adapter.provider.models.length, 0);
 });
 
 test("times out model refreshes even without a caller signal", async () => {
@@ -348,13 +343,10 @@ test("does not request network during a cache-only refresh", async () => {
 	const models = await refreshModels(refreshContext({ allowNetwork: false, force: true }));
 
 	assert.equal(requests, 0);
-	assert.deepEqual(
-		models.map(({ id }) => id),
-		getHyperFallbackModels().map(({ id }) => id),
-	);
+	assert.deepEqual(models, []);
 });
 
-test("keeps the fallback catalog state through Pi's cache-only refresh wrapper", async () => {
+test("keeps an empty catalog state through Pi's cache-only refresh wrapper", async () => {
 	const adapter = createCharmHyperAdapter(async () => {
 		throw new Error("network should not be used");
 	}, 5);
@@ -365,11 +357,11 @@ test("keeps the fallback catalog state through Pi's cache-only refresh wrapper",
 
 	await registered.refreshModels?.({ allowNetwork: false } as any);
 
-	assert.equal(adapter.catalog?.source, "fallback");
+	assert.equal(adapter.catalog?.source, "empty");
 	assert.equal(adapter.catalog?.lastError, undefined);
 });
 
-test("preserves a failed catalog diagnostic through Pi's fallback refresh", async () => {
+test("preserves a failed catalog diagnostic without a static fallback", async () => {
 	const adapter = createCharmHyperAdapter(async () => {
 		throw new Error("temporary network failure");
 	}, 5);
@@ -387,7 +379,7 @@ test("preserves a failed catalog diagnostic through Pi's fallback refresh", asyn
 
 	assert.deepEqual(
 		adapter.provider.models.map(({ id }) => id),
-		getHyperFallbackModels().map(({ id }) => id),
+		[],
 	);
 	assert.equal(adapter.catalog?.lastError, "fetch");
 });
@@ -443,7 +435,7 @@ test("restores the provider-scoped catalog before considering network", async ()
 		adapter.provider.models.map(({ id }) => id),
 		["cached-model"],
 	);
-	assert.equal(adapter.catalog?.source, "live");
+	assert.equal(adapter.catalog?.source, "cached");
 	assert.equal(requests, 0);
 	assert.equal(writes, 0);
 });
@@ -509,11 +501,8 @@ test("does not apply a catalog rejected by Pi's refresh generation guard", async
 		}),
 	);
 
-	assert.deepEqual(
-		models.map(({ id }) => id),
-		getHyperFallbackModels().map(({ id }) => id),
-	);
-	assert.equal(adapter.catalog?.source, "fallback");
+	assert.deepEqual(models, []);
+	assert.equal(adapter.catalog?.source, "empty");
 });
 
 test("starts a new refresh after Pi supersedes an older generation", async () => {
@@ -668,15 +657,7 @@ test("uses official costs only when upstream pricing is absent", () => {
 		],
 	});
 
-	assert.deepEqual(known.cost, { input: 0.95, output: 4, cacheRead: 0.16, cacheWrite: 0 });
+	assert.equal(known.cost, undefined);
 	assert.deepEqual(explicit.cost, { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
-	assert.deepEqual(unknown.cost, { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
-
-	const fallbackModels = getHyperFallbackModels();
-	assert.deepEqual(fallbackModels.find(({ id }) => id === "mistral-large-instruct-2411")?.cost, {
-		input: 2,
-		output: 6,
-		cacheRead: 0.2,
-		cacheWrite: 0,
-	});
+	assert.equal(unknown.cost, undefined);
 });

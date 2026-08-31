@@ -10,7 +10,7 @@
 
 - 由一个 Pi Provider Host 统一负责注册、Status、Preflight、实时检查和请求 Tuner
 - 由单一 Pi 入口在 `/reload` 时发现 Provider、Status、Preflight 和 Tuner Adapter 文件
-- 通过缓存回退、有界后台刷新和失败保留提供可靠的模型目录
+- 通过缓存在线快照、有界后台刷新和失败保留提供可靠的模型目录
 - 优先采用 Provider 价格元数据，并可由 OpenRouter 补全价格和质量指标
 - 显式诊断：缓存 `/status`、免费 `/status refresh` 和可能计费的 `/status check`
 - 内置 Charm Hyper、DeepSeek、Google Gemini、OpenAI Codex、OpenCode Zen 和 OpenCode Go 集成
@@ -45,7 +45,7 @@ pi install npm:@hyav/pi-provider
 
 使用 `/status refresh` 执行免费的端点、鉴权、目录和账户检查。只有明确接受一次真实模型请求及其可能产生的用量费用时，才使用 `/status check`。
 
-动态 Provider 的 API Key 引用环境变量时，如果这些变量和已存储凭据均未配置，将保留缓存或回退模型目录并跳过网络刷新，避免未配置的 Provider 产生模型目录刷新警告。
+动态 Provider 的 API Key 引用环境变量时，如果这些变量和已存储凭据均未配置，将保留最近一次成功获取的在线目录快照；如果从未成功获取过在线目录，则使用空目录，并跳过网络刷新，避免未配置的 Provider 产生模型目录刷新警告。
 
 ## 常用配置
 

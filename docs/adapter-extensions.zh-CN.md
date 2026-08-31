@@ -86,7 +86,8 @@ import { defineProviderExtension } from "@hyav/pi-provider";
 export default defineProviderExtension({
   id: "example",
   create: ({ fetch, now, modelDiscoveryTimeoutMs }) => {
-    // factory 执行阶段仅返回同步可用的 fallback 或缓存目录；禁止阻塞网络请求。
+    // factory 执行阶段同步返回最近一次在线快照或显式静态兜底。
+    // 两者都不存在时返回空目录；禁止阻塞启动等待网络请求。
     return createExampleProvider(fetch, modelDiscoveryTimeoutMs, now);
   },
 });

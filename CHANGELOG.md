@@ -2,6 +2,11 @@
 
 This file is the authoritative user-facing release history for `@hyav/pi-provider`.
 
+## Unreleased
+
+- Make Charm Hyper model catalogs online-only: use the last successful online snapshot when refresh is unavailable and an empty catalog when no snapshot exists; remove package-maintained static model, pricing, and model-specific capability fallbacks.
+- Skip malformed individual Charm Hyper models while retaining valid entries, and use Provider metadata before OpenRouter metadata when filling model fields.
+
 ## 0.1.7 - 2026-08-24
 
 - Refresh the active model catalog dynamically on `/status refresh` and `/status check` by delegating to Pi's model registry with forced network revalidation, keeping the displayed model catalog and model counts up to date without requiring `/reload`.

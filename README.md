@@ -10,7 +10,7 @@ A provider extension toolkit for [Pi](https://pi.dev). It registers LLM provider
 
 - One Pi Provider Host for registration, status, preflight checks, live checks, and request tuners
 - Provider, status, preflight, and tuner Adapter files discovered by one Pi entrypoint on `/reload`
-- Resilient model catalogs with cached fallback, bounded background refresh, and failure retention
+- Resilient model catalogs with cached online snapshots, bounded background refresh, and failure retention
 - Provider-first pricing metadata with optional OpenRouter completion and quality indicators
 - Explicit diagnostics: cached `/status`, free `/status refresh`, and potentially billable `/status check`
 - Built-in integrations for Charm Hyper, DeepSeek, Google Gemini, OpenAI Codex, OpenCode Zen, and OpenCode Go
@@ -45,7 +45,7 @@ pi install npm:@hyav/pi-provider
 
 Use `/status refresh` for free endpoint, authentication, catalog, and account checks. Use `/status check` only when you explicitly accept a real model request and possible usage charges.
 
-A dynamic Provider whose API key references environment variables keeps its cached or fallback model catalog and skips network catalog refreshes until those variables or a stored credential are available. This prevents unconfigured Providers from surfacing model-refresh warnings.
+A dynamic Provider whose API key references environment variables keeps its last successful online catalog snapshot and skips network catalog refreshes until those variables or a stored credential are available. Providers without a successful snapshot expose an empty catalog rather than inventing models. This prevents unconfigured Providers from surfacing model-refresh warnings.
 
 ## Common configuration
 
