@@ -102,6 +102,117 @@ test("falls back to a generation-checked in-memory update when persistence fails
 	assert.equal(lifecycle.catalog.source, "live");
 });
 
+test("shares discovery across caller signals without propagating caller cancellation", async () => {
+	let requests = 0;
+	let discoverySignal: AbortSignal | undefined;
+	let release: (() => void) | undefined;
+	const gate = new Promise<void>((resolve) => {
+		release = resolve;
+	});
+	const lifecycle = createModelCatalogLifecycle({
+		ttlMs: 100,
+		discover: async ({ signal }) => {
+			requests++;
+			discoverySignal = signal;
+			await gate;
+			return [{ id: "shared" }];
+		},
+		restore: () => undefined,
+		persist: (models, checkedAt) => stored(models, checkedAt),
+		onUpdate: () => {},
+		errorCode: () => "fetch",
+	});
+	const firstController = new AbortController();
+	const secondController = new AbortController();
+
+	const first = lifecycle.refreshModels(context({ allowNetwork: true, signal: firstController.signal }));
+	await new Promise((resolve) => setImmediate(resolve));
+	const second = lifecycle.refreshModels(context({ allowNetwork: true, signal: secondController.signal }));
+	firstController.abort();
+	const firstOutcome = await Promise.allSettled([first]);
+
+	assert.equal(firstOutcome[0]?.status, "rejected");
+	assert.equal(requests, 1);
+	assert.notEqual(discoverySignal, firstController.signal);
+	assert.notEqual(discoverySignal, secondController.signal);
+	assert.equal(discoverySignal?.aborted, false);
+
+	release?.();
+	assert.deepEqual(await second, [{ id: "shared" }]);
+	assert.equal(lifecycle.catalog.source, "live");
+});
+
+test("lets a newer generation publish a shared result after an older generation is rejected", async () => {
+	let release: (() => void) | undefined;
+	const gate = new Promise<void>((resolve) => {
+		release = resolve;
+	});
+	const lifecycle = createModelCatalogLifecycle({
+		ttlMs: 100,
+		discover: async () => {
+			await gate;
+			return [{ id: "shared" }];
+		},
+		restore: () => undefined,
+		persist: (models, checkedAt) => stored(models, checkedAt),
+		onUpdate: () => {},
+		errorCode: () => "fetch",
+	});
+	let publications = 0;
+	const publishContext = (accepted: boolean) =>
+		context({
+			allowNetwork: true,
+			force: true,
+			publish: async ({ update }) => {
+				publications++;
+				if (!accepted) return false;
+				update?.();
+				return true;
+			},
+		});
+
+	const older = lifecycle.refreshModels(publishContext(false));
+	await new Promise((resolve) => setImmediate(resolve));
+	const newer = lifecycle.refreshModels(publishContext(true));
+	release?.();
+	await Promise.all([older, newer]);
+
+	assert.equal(publications, 2);
+	assert.deepEqual(lifecycle.getModels(), [{ id: "shared" }]);
+	assert.equal(lifecycle.catalog.source, "live");
+});
+
+test("records synchronous discovery and persistence conversion failures", async () => {
+	const syncFailure = createModelCatalogLifecycle({
+		initialModels: [{ id: "existing" }],
+		ttlMs: 0,
+		discover: () => {
+			throw new Error("synchronous failure");
+		},
+		restore: () => undefined,
+		persist: (models, checkedAt) => stored(models, checkedAt),
+		onUpdate: () => {},
+		errorCode: () => "discovery",
+	});
+	await assert.rejects(syncFailure.refreshModels(context({ allowNetwork: true, force: true })));
+	assert.equal(syncFailure.catalog.lastError, "discovery");
+
+	const persistFailure = createModelCatalogLifecycle({
+		initialModels: [{ id: "existing" }],
+		ttlMs: 0,
+		discover: async () => [{ id: "current" }],
+		restore: () => undefined,
+		persist: () => {
+			throw new Error("conversion failure");
+		},
+		onUpdate: () => {},
+		errorCode: () => "persist",
+	});
+	await assert.rejects(persistFailure.refreshModels(context({ allowNetwork: true, force: true })));
+	assert.deepEqual(persistFailure.getModels(), [{ id: "existing" }]);
+	assert.equal(persistFailure.catalog.lastError, "persist");
+});
+
 test("keeps the last successful catalog after discovery fails", async () => {
 	const lifecycle = createModelCatalogLifecycle({
 		initialModels: [{ id: "existing" }],

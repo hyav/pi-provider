@@ -548,19 +548,16 @@ test("does not apply a catalog rejected by Pi's refresh generation guard", async
 	assert.equal(adapter.catalog?.source, "empty");
 });
 
-test("starts a new refresh after Pi supersedes an older generation", async () => {
+test("shares a refresh after Pi supersedes an older generation", async () => {
 	let requests = 0;
-	let releaseFirst: (() => void) | undefined;
-	const firstGate = new Promise<void>((resolve) => {
-		releaseFirst = resolve;
+	let release: (() => void) | undefined;
+	const gate = new Promise<void>((resolve) => {
+		release = resolve;
 	});
 	const adapter = createCharmHyperAdapter(
 		async () => {
 			requests++;
-			if (requests === 1) {
-				await firstGate;
-				return new Response(JSON.stringify({ data: [{ id: "stale-model" }] }), { status: 200 });
-			}
+			await gate;
 			return new Response(JSON.stringify({ data: [{ id: "current-model" }] }), { status: 200 });
 		},
 		100,
@@ -589,13 +586,12 @@ test("starts a new refresh after Pi supersedes an older generation", async () =>
 	activeGeneration = 2;
 	firstController.abort();
 	const second = refreshModels(contextFor(2, new AbortController().signal));
-	void second.catch(() => undefined);
 	await new Promise((resolve) => setImmediate(resolve));
 	const requestsBeforeRelease = requests;
-	releaseFirst?.();
+	release?.();
 	const [firstOutcome, secondOutcome] = await Promise.allSettled([first, second]);
 
-	assert.equal(requestsBeforeRelease, 2);
+	assert.equal(requestsBeforeRelease, 1);
 	assert.equal(firstOutcome.status, "rejected");
 	assert.equal(secondOutcome.status, "fulfilled");
 	assert.deepEqual(

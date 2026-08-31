@@ -44,12 +44,43 @@ async function publish(
 	}
 }
 
+function abortReason(signal: AbortSignal): unknown {
+	return signal.reason ?? new DOMException("The operation was aborted", "AbortError");
+}
+
+function waitForCaller<T>(request: Promise<T>, signal: AbortSignal): Promise<T> {
+	if (signal.aborted) return Promise.reject(abortReason(signal));
+	return new Promise<T>((resolve, reject) => {
+		const onAbort = () => reject(abortReason(signal));
+		signal.addEventListener("abort", onAbort, { once: true });
+		void request.then(
+			(value) => {
+				signal.removeEventListener("abort", onAbort);
+				resolve(value);
+			},
+			(error) => {
+				signal.removeEventListener("abort", onAbort);
+				reject(error);
+			},
+		);
+	});
+}
+
+interface ActiveCatalogRefresh {
+	request: Promise<ProviderModelDraft[]>;
+	publication: Promise<void>;
+	waiters: number;
+	settled: boolean;
+	applied: boolean;
+	failureRecorded: boolean;
+}
+
 export function createModelCatalogLifecycle(options: ModelCatalogLifecycleOptions): ModelCatalogLifecycle {
 	const now = options.now ?? Date.now;
 	let models = [...(options.initialModels ?? [])];
 	let lastRefreshAt: number | undefined;
 	let lastCatalogUpdatedAt: number | undefined;
-	let inFlight: { signal: AbortSignal; request: Promise<ProviderModelDraft[]> } | undefined;
+	let inFlight: ActiveCatalogRefresh | undefined;
 	const catalog: ModelCatalogStatus = {
 		source: options.initialSource ?? (models.length > 0 ? "static" : "empty"),
 		modelCount: models.length,
@@ -78,6 +109,41 @@ export function createModelCatalogLifecycle(options: ModelCatalogLifecycleOption
 		});
 	};
 
+	const clearSettledRefresh = (active: ActiveCatalogRefresh) => {
+		if (inFlight === active && active.settled && active.waiters === 0) inFlight = undefined;
+	};
+
+	const recordFailure = (active: ActiveCatalogRefresh, error: unknown) => {
+		if (active.failureRecorded || isAbortError(error)) return;
+		active.failureRecorded = true;
+		lastRefreshAt = now();
+		catalog.lastError = options.errorCode(error);
+	};
+
+	const startRefresh = (context: ProviderRefreshContext): ActiveCatalogRefresh => {
+		const active: ActiveCatalogRefresh = {
+			request: Promise.resolve([]),
+			publication: Promise.resolve(),
+			waiters: 0,
+			settled: false,
+			applied: false,
+			failureRecorded: false,
+		};
+		const sharedContext = { ...context, signal: new AbortController().signal };
+		active.request = Promise.resolve()
+			.then(() => options.discover(sharedContext))
+			.catch((error: unknown) => {
+				recordFailure(active, error);
+				throw error;
+			})
+			.finally(() => {
+				active.settled = true;
+				clearSettledRefresh(active);
+			});
+		inFlight = active;
+		return active;
+	};
+
 	const refreshModels = async (context: ProviderRefreshContext): Promise<ProviderModelDraft[]> => {
 		await restoreStored(context);
 		if (context.allowNetwork !== true || context.signal.aborted) return [...models];
@@ -86,43 +152,34 @@ export function createModelCatalogLifecycle(options: ModelCatalogLifecycleOption
 		const isFresh =
 			lastRefreshAt !== undefined && Math.max(0, currentTime - lastRefreshAt) <= Math.max(0, options.ttlMs);
 		if (!context.force && isFresh) return [...models];
-		if (inFlight?.signal === context.signal) return inFlight.request;
 
-		const request = (async (): Promise<ProviderModelDraft[]> => {
-			try {
-				const refreshed = await options.discover(context);
-				if (context.signal.aborted) {
-					throw context.signal.reason ?? new DOMException("The operation was aborted", "AbortError");
-				}
+		const active = inFlight ?? startRefresh(context);
+		active.waiters++;
+		try {
+			const refreshed = await waitForCaller(active.request, context.signal);
+			const attempt = active.publication.then(async () => {
+				if (active.applied || context.signal.aborted) return;
 				const updatedAt = now();
 				await publish(
 					context,
 					() => {
 						applyModels(refreshed, "live", updatedAt);
 						lastRefreshAt = updatedAt;
+						active.applied = true;
 					},
 					options.persist(refreshed, updatedAt),
 				);
-				return [...models];
-			} catch (error) {
-				if (!context.signal.aborted && !isAbortError(error)) {
-					lastRefreshAt = now();
-					catalog.lastError = options.errorCode(error);
-				}
-				throw error;
-			}
-		})();
-		const active = { signal: context.signal, request };
-		inFlight = active;
-		void request.then(
-			() => {
-				if (inFlight === active) inFlight = undefined;
-			},
-			() => {
-				if (inFlight === active) inFlight = undefined;
-			},
-		);
-		return request;
+			});
+			active.publication = attempt.catch(() => undefined);
+			await waitForCaller(attempt, context.signal);
+			return [...models];
+		} catch (error) {
+			if (!context.signal.aborted) recordFailure(active, error);
+			throw error;
+		} finally {
+			active.waiters = Math.max(0, active.waiters - 1);
+			clearSettledRefresh(active);
+		}
 	};
 
 	options.onUpdate(models);
