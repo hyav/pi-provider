@@ -440,6 +440,49 @@ test("restores the provider-scoped catalog before considering network", async ()
 	assert.equal(writes, 0);
 });
 
+test("replaces a cached catalog with the complete live catalog", async () => {
+	const stored: NonNullable<ProviderRefreshContext["stored"]> = {
+		checkedAt: 1_000,
+		models: [
+			{
+				id: "removed-model",
+				name: "Removed Model",
+				api: "openai-completions",
+				provider: "charm-hyper",
+				baseUrl: "https://hyper.charm.land/v1",
+				reasoning: false,
+				input: ["text"],
+				cost: { input: 1, output: 2, cacheRead: 0, cacheWrite: 0 },
+				contextWindow: 32_000,
+				maxTokens: 4_000,
+			},
+		],
+	};
+	const adapter = createCharmHyperAdapter(
+		async () => new Response(JSON.stringify({ data: [{ id: "current-model" }] }), { status: 200 }),
+		100,
+		() => 2_000,
+	);
+	const refreshModels = adapter.provider.refreshModels;
+	assert.ok(refreshModels);
+
+	await refreshModels(
+		refreshContext({
+			allowNetwork: true,
+			force: true,
+			stored,
+			credential: { type: "api_key", key: "test-key" },
+		}),
+	);
+
+	assert.deepEqual(
+		adapter.provider.models.map(({ id }) => id),
+		["current-model"],
+	);
+	assert.equal(adapter.catalog?.source, "live");
+	assert.equal(adapter.catalog?.modelCount, 1);
+});
+
 test("persists a successful catalog for a later adapter instance", async () => {
 	let stored: ProviderRefreshContext["stored"];
 	let requests = 0;

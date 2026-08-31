@@ -207,6 +207,28 @@ test("records the source of each registered model field", () => {
 	});
 });
 
+test("preserves an explicit Provider zero price", () => {
+	const adapter = providerAdapter();
+	adapter.pricing = undefined;
+	adapter.provider.models = [
+		{
+			id: "model-alpha",
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			pricingSource: "provider",
+		},
+	];
+	prepareProviderRegistration(adapter, getDefaultPiProviderDependencies(), {
+		"model-alpha": { cost: { input: 5, output: 30, cacheRead: 0.5, cacheWrite: 6.25 } },
+	});
+
+	assert.deepEqual(adapter.registration?.modelMetadata?.["model-alpha"]?.pricing, {
+		known: true,
+		source: "provider",
+		baseCost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+		effectiveCost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+	});
+});
+
 test("keeps an explicit discount unavailable when no base price exists", () => {
 	const adapter = providerAdapter();
 	const registered = prepareProviderRegistration(adapter, getDefaultPiProviderDependencies());
