@@ -118,6 +118,10 @@ export interface ModelCatalogStatus {
 	source: ModelCatalogSource;
 	modelCount: number;
 	updatedAt?: number;
+	lastSuccessfulRefreshAt?: number;
+	lastAttemptAt?: number;
+	consecutiveFailures?: number;
+	nextRetryAt?: number;
 	lastError?: string;
 }
 

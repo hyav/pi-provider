@@ -83,6 +83,50 @@ test("uses consistent freshness lines for catalog, preflight, and account status
 	assert.doesNotMatch(result.report, /Updated:/);
 });
 
+test("shows model catalog retry backoff diagnostics", () => {
+	const now = 1_700_000_000_000;
+	const model: any = {
+		provider: "retry-provider",
+		id: "model-alpha",
+		api: "openai-completions",
+		baseUrl: "https://provider.invalid/v1",
+		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+		contextWindow: 128_000,
+		maxTokens: 16_384,
+		input: ["text"],
+		reasoning: false,
+	};
+	const result = formatProviderStatus(
+		model,
+		{
+			id: "retry-provider",
+			provider: { models: [model] },
+			catalog: {
+				source: "cached",
+				modelCount: 1,
+				updatedAt: now - 60_000,
+				lastError: "fetch",
+				consecutiveFailures: 2,
+				nextRetryAt: now + 30_000,
+			},
+		} as any,
+		undefined,
+		undefined,
+		undefined,
+		{ configured: true },
+		undefined,
+		undefined,
+		undefined,
+		undefined,
+		false,
+		now,
+	);
+
+	assert.match(result.report, /Status: stale · cached · 1m ago/);
+	assert.match(result.report, /Error: fetch/);
+	assert.match(result.report, /Retry: in 30s · 2 consecutive failures/);
+});
+
 test("shows quality metrics and inline provenance without changing health severity", () => {
 	const model: any = {
 		provider: "reference-provider",

@@ -4,6 +4,8 @@ export interface ModelCatalogLifecycleOptions {
 	initialModels?: ProviderModelDraft[];
 	initialSource?: ModelCatalogSource;
 	ttlMs: number;
+	failureBackoffMs?: number;
+	maxFailureBackoffMs?: number;
 	now?: () => number;
 	discover(context: ProviderRefreshContext): Promise<ProviderModelDraft[]>;
 	restore(stored: ProviderRefreshContext["stored"]): ProviderModelDraft[] | undefined;
@@ -66,6 +68,16 @@ function waitForCaller<T>(request: Promise<T>, signal: AbortSignal): Promise<T> 
 	});
 }
 
+const DEFAULT_FAILURE_BACKOFF_MS = 30_000;
+const DEFAULT_MAX_FAILURE_BACKOFF_MS = 15 * 60_000;
+
+function finiteNonNegative(value: number | undefined, fallback: number, label: string): number {
+	const resolved = value ?? fallback;
+	if (!Number.isFinite(resolved) || resolved < 0)
+		throw new RangeError(`${label} must be a finite non-negative number`);
+	return resolved;
+}
+
 interface ActiveCatalogRefresh {
 	request: Promise<ProviderModelDraft[]>;
 	publication: Promise<void>;
@@ -77,13 +89,26 @@ interface ActiveCatalogRefresh {
 
 export function createModelCatalogLifecycle(options: ModelCatalogLifecycleOptions): ModelCatalogLifecycle {
 	const now = options.now ?? Date.now;
+	const failureBackoffMs = finiteNonNegative(
+		options.failureBackoffMs,
+		DEFAULT_FAILURE_BACKOFF_MS,
+		"Model catalog failure backoff",
+	);
+	const maxFailureBackoffMs = finiteNonNegative(
+		options.maxFailureBackoffMs,
+		DEFAULT_MAX_FAILURE_BACKOFF_MS,
+		"Model catalog maximum failure backoff",
+	);
+	if (maxFailureBackoffMs < failureBackoffMs) {
+		throw new RangeError("Model catalog maximum failure backoff must not be less than its initial backoff");
+	}
 	let models = [...(options.initialModels ?? [])];
-	let lastRefreshAt: number | undefined;
 	let lastCatalogUpdatedAt: number | undefined;
 	let inFlight: ActiveCatalogRefresh | undefined;
 	const catalog: ModelCatalogStatus = {
 		source: options.initialSource ?? (models.length > 0 ? "static" : "empty"),
 		modelCount: models.length,
+		consecutiveFailures: 0,
 	};
 
 	const applyModels = (nextModels: ProviderModelDraft[], source: ModelCatalogSource, updatedAt?: number) => {
@@ -92,8 +117,11 @@ export function createModelCatalogLifecycle(options: ModelCatalogLifecycleOption
 		catalog.source = source;
 		catalog.modelCount = models.length;
 		catalog.lastError = undefined;
+		catalog.consecutiveFailures = 0;
+		catalog.nextRetryAt = undefined;
 		if (updatedAt !== undefined) {
 			catalog.updatedAt = updatedAt;
+			catalog.lastSuccessfulRefreshAt = updatedAt;
 			lastCatalogUpdatedAt = updatedAt;
 		}
 	};
@@ -105,7 +133,6 @@ export function createModelCatalogLifecycle(options: ModelCatalogLifecycleOption
 		if (lastCatalogUpdatedAt !== undefined && (checkedAt === undefined || checkedAt <= lastCatalogUpdatedAt)) return;
 		await publish(context, () => {
 			applyModels(restored, "cached", checkedAt);
-			if (checkedAt !== undefined) lastRefreshAt = checkedAt;
 		});
 	};
 
@@ -116,7 +143,11 @@ export function createModelCatalogLifecycle(options: ModelCatalogLifecycleOption
 	const recordFailure = (active: ActiveCatalogRefresh, error: unknown) => {
 		if (active.failureRecorded || isAbortError(error)) return;
 		active.failureRecorded = true;
-		lastRefreshAt = now();
+		const failedAt = now();
+		const consecutiveFailures = (catalog.consecutiveFailures ?? 0) + 1;
+		const multiplier = 2 ** Math.min(30, consecutiveFailures - 1);
+		catalog.consecutiveFailures = consecutiveFailures;
+		catalog.nextRetryAt = failedAt + Math.min(maxFailureBackoffMs, failureBackoffMs * multiplier);
 		catalog.lastError = options.errorCode(error);
 	};
 
@@ -130,6 +161,7 @@ export function createModelCatalogLifecycle(options: ModelCatalogLifecycleOption
 			failureRecorded: false,
 		};
 		const sharedContext = { ...context, signal: new AbortController().signal };
+		catalog.lastAttemptAt = now();
 		active.request = Promise.resolve()
 			.then(() => options.discover(sharedContext))
 			.catch((error: unknown) => {
@@ -150,8 +182,17 @@ export function createModelCatalogLifecycle(options: ModelCatalogLifecycleOption
 
 		const currentTime = now();
 		const isFresh =
-			lastRefreshAt !== undefined && Math.max(0, currentTime - lastRefreshAt) <= Math.max(0, options.ttlMs);
-		if (!context.force && isFresh) return [...models];
+			catalog.lastSuccessfulRefreshAt !== undefined &&
+			Math.max(0, currentTime - catalog.lastSuccessfulRefreshAt) <= Math.max(0, options.ttlMs);
+		if (!context.force && catalog.lastError === undefined && isFresh) return [...models];
+		if (
+			!context.force &&
+			inFlight === undefined &&
+			catalog.nextRetryAt !== undefined &&
+			currentTime < catalog.nextRetryAt
+		) {
+			return [...models];
+		}
 
 		const active = inFlight ?? startRefresh(context);
 		active.waiters++;
@@ -164,7 +205,6 @@ export function createModelCatalogLifecycle(options: ModelCatalogLifecycleOption
 					context,
 					() => {
 						applyModels(refreshed, "live", updatedAt);
-						lastRefreshAt = updatedAt;
 						active.applied = true;
 					},
 					options.persist(refreshed, updatedAt),

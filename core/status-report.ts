@@ -280,6 +280,12 @@ function formatCatalog(
 	if (catalog?.updatedAt !== undefined) statusParts.push(formatAge(now, catalog.updatedAt));
 	const lines = [`Status: ${statusParts.join(" · ")}`, `Models: ${count}`];
 	if (catalog?.lastError) lines.push(`Error: ${catalog.lastError}`);
+	if (catalog?.lastError && catalog.nextRetryAt !== undefined) {
+		const failures = catalog.consecutiveFailures ?? 1;
+		lines.push(
+			`Retry: ${formatUntil(now, catalog.nextRetryAt)} · ${failures} consecutive failure${failures === 1 ? "" : "s"}`,
+		);
+	}
 	const issue =
 		catalog?.lastError !== undefined
 			? {

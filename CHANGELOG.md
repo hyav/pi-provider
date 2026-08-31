@@ -8,6 +8,7 @@ This file is the authoritative user-facing release history for `@hyav/pi-provide
 - Skip malformed individual Charm Hyper models while retaining valid entries, and use Provider metadata before OpenRouter metadata when filling model fields.
 - Add a public model-catalog lifecycle helper for cached snapshot restoration, TTL checks, generation-guarded publication, persistence fallback, complete live replacement, and failure retention; migrate Charm Hyper to it.
 - Share one model-catalog discovery request across concurrent callers with different cancellation signals, while keeping caller cancellation and generation-guarded publication independent.
+- Separate successful-catalog TTL from exponential failure backoff, expose attempt, success, failure-count, and retry diagnostics, and show retry timing in `/status`.
 
 ## 0.1.7 - 2026-08-24
 

@@ -162,6 +162,18 @@ export function validateProviderAdapter(adapter: unknown): asserts adapter is Pr
 		}
 		if (adapter.catalog.updatedAt !== undefined)
 			assertFiniteNonNegative(adapter.catalog.updatedAt, "Catalog updatedAt");
+		for (const field of ["lastSuccessfulRefreshAt", "lastAttemptAt", "nextRetryAt"] as const) {
+			if (adapter.catalog[field] !== undefined) {
+				assertFiniteNonNegative(adapter.catalog[field], `Catalog ${field}`);
+			}
+		}
+		const consecutiveFailures = adapter.catalog.consecutiveFailures;
+		if (
+			consecutiveFailures !== undefined &&
+			(typeof consecutiveFailures !== "number" || !Number.isInteger(consecutiveFailures) || consecutiveFailures < 0)
+		) {
+			throw new Error(`Provider ${adapter.id} has invalid catalog failure count`);
+		}
 		if (adapter.catalog.lastError !== undefined && !isSafeText(adapter.catalog.lastError)) {
 			throw new Error(`Provider ${adapter.id} has invalid catalog error`);
 		}

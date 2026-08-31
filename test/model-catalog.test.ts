@@ -70,7 +70,16 @@ test("publishes a complete live replacement and persists it", async () => {
 
 	assert.deepEqual(models, [{ id: "current" }]);
 	assert.deepEqual(persisted, stored([{ id: "current" }], 20));
-	assert.deepEqual(lifecycle.catalog, { source: "live", modelCount: 1, updatedAt: 20, lastError: undefined });
+	assert.deepEqual(lifecycle.catalog, {
+		source: "live",
+		modelCount: 1,
+		updatedAt: 20,
+		lastSuccessfulRefreshAt: 20,
+		lastAttemptAt: 20,
+		consecutiveFailures: 0,
+		nextRetryAt: undefined,
+		lastError: undefined,
+	});
 	assert.deepEqual(await lifecycle.refreshModels(context({ allowNetwork: true })), [{ id: "current" }]);
 });
 
@@ -182,6 +191,63 @@ test("lets a newer generation publish a shared result after an older generation 
 	assert.equal(lifecycle.catalog.source, "live");
 });
 
+test("separates successful freshness from exponential failure backoff", async () => {
+	let now = 1_000;
+	let requests = 0;
+	const lifecycle = createModelCatalogLifecycle({
+		initialModels: [{ id: "existing" }],
+		ttlMs: 100,
+		failureBackoffMs: 30_000,
+		maxFailureBackoffMs: 120_000,
+		now: () => now,
+		discover: async () => {
+			requests++;
+			if (requests === 1 || requests === 2 || requests === 4) throw new Error("temporary failure");
+			return [{ id: "current" }];
+		},
+		restore: () => undefined,
+		persist: (models, checkedAt) => stored(models, checkedAt),
+		onUpdate: () => {},
+		errorCode: () => "fetch",
+	});
+
+	await assert.rejects(lifecycle.refreshModels(context({ allowNetwork: true })));
+	assert.equal(lifecycle.catalog.lastSuccessfulRefreshAt, undefined);
+	assert.equal(lifecycle.catalog.lastAttemptAt, 1_000);
+	assert.equal(lifecycle.catalog.consecutiveFailures, 1);
+	assert.equal(lifecycle.catalog.nextRetryAt, 31_000);
+
+	assert.deepEqual(await lifecycle.refreshModels(context({ allowNetwork: true })), [{ id: "existing" }]);
+	assert.equal(requests, 1);
+
+	now = 31_000;
+	await assert.rejects(lifecycle.refreshModels(context({ allowNetwork: true })));
+	assert.equal(lifecycle.catalog.consecutiveFailures, 2);
+	assert.equal(lifecycle.catalog.nextRetryAt, 91_000);
+
+	now = 40_000;
+	assert.deepEqual(await lifecycle.refreshModels(context({ allowNetwork: true, force: true })), [{ id: "current" }]);
+	assert.equal(requests, 3);
+	assert.equal(lifecycle.catalog.lastSuccessfulRefreshAt, 40_000);
+	assert.equal(lifecycle.catalog.lastAttemptAt, 40_000);
+	assert.equal(lifecycle.catalog.consecutiveFailures, 0);
+	assert.equal(lifecycle.catalog.nextRetryAt, undefined);
+	assert.equal(lifecycle.catalog.lastError, undefined);
+
+	now = 40_100;
+	await assert.rejects(lifecycle.refreshModels(context({ allowNetwork: true, force: true })));
+	assert.equal(lifecycle.catalog.lastSuccessfulRefreshAt, 40_000);
+	assert.equal(lifecycle.catalog.nextRetryAt, 70_100);
+	assert.deepEqual(await lifecycle.refreshModels(context({ allowNetwork: true })), [{ id: "current" }]);
+	assert.equal(requests, 4);
+
+	now = 70_100;
+	assert.deepEqual(await lifecycle.refreshModels(context({ allowNetwork: true })), [{ id: "current" }]);
+	assert.equal(requests, 5);
+	assert.equal(lifecycle.catalog.lastSuccessfulRefreshAt, 70_100);
+	assert.equal(lifecycle.catalog.consecutiveFailures, 0);
+});
+
 test("records synchronous discovery and persistence conversion failures", async () => {
 	const syncFailure = createModelCatalogLifecycle({
 		initialModels: [{ id: "existing" }],
@@ -211,6 +277,23 @@ test("records synchronous discovery and persistence conversion failures", async 
 	await assert.rejects(persistFailure.refreshModels(context({ allowNetwork: true, force: true })));
 	assert.deepEqual(persistFailure.getModels(), [{ id: "existing" }]);
 	assert.equal(persistFailure.catalog.lastError, "persist");
+});
+
+test("rejects invalid failure backoff settings", () => {
+	const options = {
+		ttlMs: 100,
+		discover: async () => [{ id: "model" }],
+		restore: () => undefined,
+		persist: (models: ProviderModelDraft[], checkedAt: number) => stored(models, checkedAt),
+		onUpdate: () => {},
+		errorCode: () => "fetch",
+	};
+
+	assert.throws(() => createModelCatalogLifecycle({ ...options, failureBackoffMs: -1 }), /non-negative/);
+	assert.throws(
+		() => createModelCatalogLifecycle({ ...options, failureBackoffMs: 100, maxFailureBackoffMs: 99 }),
+		/must not be less/,
+	);
 });
 
 test("keeps the last successful catalog after discovery fails", async () => {

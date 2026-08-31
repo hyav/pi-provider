@@ -43,6 +43,35 @@ test("applies the same model-catalog boundary to initial and cached model lists"
 	assert.throws(() => normalizeProviderModels([{ id: "cached-model", name: "bad-\u001b[2J-name" }]), /safe text/i);
 });
 
+test("validates model catalog retry diagnostics", () => {
+	const adapter: ProviderAdapter = {
+		id: "catalog-diagnostics",
+		catalog: {
+			source: "cached",
+			modelCount: 1,
+			lastSuccessfulRefreshAt: 1,
+			lastAttemptAt: 2,
+			consecutiveFailures: 2,
+			nextRetryAt: 3,
+			lastError: "fetch",
+		},
+		provider: {
+			name: "Catalog Diagnostics",
+			baseUrl: "https://provider.invalid/v1",
+			apiKey: "$CATALOG_DIAGNOSTICS_KEY",
+			api: "openai-completions",
+			models: [{ id: "model" }],
+		},
+	};
+
+	assert.doesNotThrow(() => validateProviderAdapter(adapter));
+	adapter.catalog!.consecutiveFailures = -1;
+	assert.throws(() => validateProviderAdapter(adapter), /failure count/i);
+	adapter.catalog!.consecutiveFailures = 1;
+	adapter.catalog!.nextRetryAt = Number.NaN;
+	assert.throws(() => validateProviderAdapter(adapter), /nextRetryAt/);
+});
+
 test("accepts dependency objects created before runtime pricing policies existed", () => {
 	const legacyRuntime = getDefaultPiProviderDependencies();
 	delete legacyRuntime.pricingPolicies;
