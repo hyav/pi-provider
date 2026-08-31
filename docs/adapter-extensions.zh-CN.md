@@ -93,6 +93,8 @@ export default defineProviderExtension({
 });
 ```
 
+动态 Provider Adapter 可以使用公开的 `createModelCatalogLifecycle()` helper 处理快照恢复、TTL、受 generation guard 保护的发布、持久化失败降级、在线目录完整替换，以及刷新失败时保留最近一次成功目录。Adapter 仍负责端点鉴权、响应解析与校验、缓存模型转换、错误码映射，并通过 `onUpdate` 将模型赋给 Provider 定义。`initialModels` 表示显式静态兜底；省略时初始来源为 `"empty"`。恢复的快照标记为 `"cached"`，成功发布的在线目录标记为 `"live"`。当前 helper 只合并共享同一刷新 signal 的并发调用，跨 signal 请求共享与重试退避尚不属于其契约。
+
 其他目录分别使用 `defineStatusExtension`、`definePreflightExtension` 和 `defineTunerExtension`。身份元数据必须静态提供：
 
 - Provider: `id`

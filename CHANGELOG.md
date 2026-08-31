@@ -6,6 +6,7 @@ This file is the authoritative user-facing release history for `@hyav/pi-provide
 
 - Make Charm Hyper model catalogs online-only: use the last successful online snapshot when refresh is unavailable and an empty catalog when no snapshot exists; remove package-maintained static model, pricing, and model-specific capability fallbacks.
 - Skip malformed individual Charm Hyper models while retaining valid entries, and use Provider metadata before OpenRouter metadata when filling model fields.
+- Add a public model-catalog lifecycle helper for cached snapshot restoration, TTL checks, generation-guarded publication, persistence fallback, complete live replacement, and failure retention; migrate Charm Hyper to it.
 
 ## 0.1.7 - 2026-08-24
 

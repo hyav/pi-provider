@@ -54,6 +54,8 @@ export type {
 	LiveCheckSnapshot,
 } from "./core/live-check-manager.ts";
 export { getLiveCheckKey, LIVE_CHECK_SCOPE, LiveCheckManager } from "./core/live-check-manager.ts";
+export type { ModelCatalogLifecycle, ModelCatalogLifecycleOptions } from "./core/model-catalog.ts";
+export { createModelCatalogLifecycle } from "./core/model-catalog.ts";
 export {
 	applyOfficialModelCosts,
 	clearPricingCache,

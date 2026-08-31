@@ -89,6 +89,8 @@ export default defineProviderExtension({
 });
 ```
 
+Dynamic Provider adapters may use the public `createModelCatalogLifecycle()` helper for snapshot restoration, TTL checks, generation-guarded publication, persistence fallback, complete live replacement, and retention of the last successful catalog after errors. The adapter remains responsible for endpoint authentication, response parsing and validation, stored-model conversion, error-code mapping, and assigning `onUpdate` models to its Provider definition. `initialModels` represents an explicit static fallback; omit it to start with `source: "empty"`. A restored snapshot is reported as `"cached"`, while a successful network publication is `"live"`. Concurrent calls sharing the same refresh signal reuse one request; cross-signal request sharing and retry backoff are not part of this helper contract yet.
+
 Other directories use `defineStatusExtension`, `definePreflightExtension`, and `defineTunerExtension`. Identity metadata must be statically provided:
 
 - Provider: `id`
