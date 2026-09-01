@@ -114,6 +114,14 @@ function selectPricingAdjustment(
 	return model.pricingAdjustment ?? policy?.models?.[model.id.trim()] ?? policy?.defaultAdjustment;
 }
 
+function getDraftCostSource(
+	draft: ProviderModelDraft | undefined,
+	officialMeta: OfficialModelMeta | undefined,
+): ProviderPricingSource | "default" {
+	if (draft?.cost !== undefined) return draft.pricingSource ?? "provider";
+	return officialMeta?.costKnown !== false && officialMeta?.cost !== undefined ? "official" : "default";
+}
+
 function resolveModelRegistration(
 	adapter: ProviderAdapter,
 	runtime: PiProviderDependencies,
@@ -129,6 +137,7 @@ function resolveModelRegistration(
 		const originalDraft = modelDrafts[index];
 		const officialMeta = findOfficialMeta(modelId, officialPricing);
 		const fieldSources = {
+			cost: getDraftCostSource(originalDraft, officialMeta),
 			contextWindow:
 				originalDraft?.contextWindow !== undefined
 					? ("provider" as const)
@@ -151,6 +160,12 @@ function resolveModelRegistration(
 				originalDraft?.reasoning !== undefined
 					? ("provider" as const)
 					: officialMeta?.reasoning !== undefined
+						? ("official" as const)
+						: ("default" as const),
+			thinkingLevelMap:
+				originalDraft?.thinkingLevelMap !== undefined
+					? ("provider" as const)
+					: officialMeta?.thinkingLevelMap !== undefined
 						? ("official" as const)
 						: ("default" as const),
 		};

@@ -11,6 +11,7 @@ This file is the authoritative user-facing release history for `@hyav/pi-provide
 - Separate successful-catalog TTL from exponential failure backoff, expose attempt, success, failure-count, and retry diagnostics, and show retry timing in `/status`.
 - Report bounded invalid and duplicate model counts for accepted online catalogs without retaining remote model IDs or payload content.
 - Add accurately named OpenRouter metadata APIs (`fetchOfficialModelMetadata()` and `applyOfficialModelMetadata()`), migrate internal callers, and retain the pricing-named APIs as deprecated compatibility wrappers.
+- Extend field-level provenance to normalized cost and thinking-level maps while keeping `pricing.source` authoritative for known and effective pricing.
 
 ## 0.1.7 - 2026-08-24
 

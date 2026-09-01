@@ -589,6 +589,11 @@ export function formatProviderStatus(
 		`  Max output: ${formatTokens(model.maxTokens)}${formatModelFieldSource(fieldSources?.maxTokens)}`,
 		`  Input: ${model.input?.join(", ") || "unknown"}${formatModelFieldSource(fieldSources?.input)}`,
 		`  Reasoning: ${formatReasoning(model)}${formatModelFieldSource(fieldSources?.reasoning)}`,
+		...(model.thinkingLevelMap
+			? [
+					`  Thinking levels: ${getSupportedReasoningLevels(model).join(", ") || "none"}${formatModelFieldSource(fieldSources?.thinkingLevelMap)}`,
+				]
+			: []),
 		`  Pricing: ${formatPricing(model, options.modelMetadata)}${pricingSource}`,
 		...(model.cost?.tiers?.map((tier) => `  Pricing tier: ${formatPricingTier(tier)}`) ?? []),
 		...(options.modelMetadata?.pricing?.note ? [`  Pricing note: ${options.modelMetadata.pricing.note}`] : []),

@@ -146,7 +146,16 @@ test("shows quality metrics and inline provenance without changing health severi
 		contextWindow: 128_000,
 		maxTokens: 16_384,
 		input: ["text"],
-		reasoning: false,
+		reasoning: true,
+		thinkingLevelMap: {
+			off: null,
+			minimal: null,
+			low: "low",
+			medium: null,
+			high: "high",
+			xhigh: null,
+			max: null,
+		},
 	};
 	const modelMetadata = {
 		pricing: {
@@ -157,10 +166,12 @@ test("shows quality metrics and inline provenance without changing health severi
 			adjustment: { multiplier: 0.8, label: "20% provider discount" },
 		},
 		fieldSources: {
+			cost: "official",
 			contextWindow: "official",
 			maxTokens: "official",
 			input: "official",
 			reasoning: "official",
+			thinkingLevelMap: "official",
 		},
 		quality: [
 			{
@@ -209,7 +220,8 @@ test("shows quality metrics and inline provenance without changing health severi
 	assert.match(result.report, /Context: 128k · OpenRouter/);
 	assert.match(result.report, /Max output: 16k · OpenRouter/);
 	assert.match(result.report, /Input: text · OpenRouter/);
-	assert.match(result.report, /Reasoning: not supported · OpenRouter/);
+	assert.match(result.report, /Reasoning: supported \(low, high\) · OpenRouter/);
+	assert.match(result.report, /Thinking levels: low, high · OpenRouter/);
 	assert.match(
 		result.report,
 		/Quality:\n {2}Status: fresh · 12m ago\n {2}Source: AA\/OpenRouter\n {2}Indices: intelligence 51.2 · coding 71.4 · agentic 45.6/,

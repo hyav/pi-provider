@@ -200,11 +200,58 @@ test("records the source of each registered model field", () => {
 	});
 
 	assert.deepEqual(adapter.registration?.modelMetadata?.["model-alpha"]?.fieldSources, {
+		cost: "official",
 		contextWindow: "provider",
 		maxTokens: "official",
 		input: "provider",
 		reasoning: "provider",
+		thinkingLevelMap: "default",
 	});
+});
+
+test("records cost and thinking-map sources without overriding Provider fields", () => {
+	const adapter = providerAdapter();
+	adapter.pricing = undefined;
+	adapter.provider.models = [
+		{
+			id: "provider-model",
+			cost: { input: 1, output: 2, cacheRead: 0, cacheWrite: 0 },
+			pricingSource: "fallback",
+			thinkingLevelMap: { high: "provider-high" },
+		},
+		{ id: "official-model" },
+	];
+	prepareProviderRegistration(adapter, getDefaultPiProviderDependencies(), {
+		"provider-model": {
+			cost: { input: 5, output: 30, cacheRead: 0.5, cacheWrite: 6.25 },
+			thinkingLevelMap: { high: "official-high" },
+		},
+		"official-model": {
+			cost: { input: 3, output: 9, cacheRead: 0, cacheWrite: 0 },
+			thinkingLevelMap: { low: "low", high: "high" },
+		},
+	});
+
+	assert.equal(adapter.registration?.modelMetadata?.["provider-model"]?.fieldSources?.cost, "fallback");
+	assert.equal(adapter.registration?.modelMetadata?.["provider-model"]?.fieldSources?.thinkingLevelMap, "provider");
+	assert.equal(adapter.registration?.modelMetadata?.["provider-model"]?.pricing.source, "fallback");
+	assert.deepEqual(adapter.registration?.modelDrafts[0]?.thinkingLevelMap, { high: "provider-high" });
+	assert.equal(adapter.registration?.modelMetadata?.["official-model"]?.fieldSources?.cost, "official");
+	assert.equal(adapter.registration?.modelMetadata?.["official-model"]?.fieldSources?.thinkingLevelMap, "official");
+	assert.equal(adapter.registration?.modelMetadata?.["official-model"]?.pricing.source, "official");
+});
+
+test("records default sources when cost and thinking metadata are unavailable", () => {
+	const adapter = providerAdapter();
+	adapter.pricing = undefined;
+	adapter.provider.models = [{ id: "model-without-metadata" }];
+	prepareProviderRegistration(adapter, getDefaultPiProviderDependencies());
+
+	const metadata = adapter.registration?.modelMetadata?.["model-without-metadata"];
+	assert.equal(metadata?.fieldSources?.cost, "default");
+	assert.equal(metadata?.fieldSources?.thinkingLevelMap, "default");
+	assert.equal(metadata?.pricing.source, "none");
+	assert.equal(metadata?.pricing.known, false);
 });
 
 test("preserves an explicit Provider zero price", () => {
@@ -227,6 +274,7 @@ test("preserves an explicit Provider zero price", () => {
 		baseCost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 		effectiveCost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 	});
+	assert.equal(adapter.registration?.modelMetadata?.["model-alpha"]?.fieldSources?.cost, "provider");
 });
 
 test("keeps an explicit discount unavailable when no base price exists", () => {

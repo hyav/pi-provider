@@ -180,10 +180,12 @@ function getNativeModelMetadata(
 				: {}),
 		},
 		fieldSources: {
+			cost: "native",
 			contextWindow: "native",
 			maxTokens: "native",
 			input: "native",
 			reasoning: "native",
+			thinkingLevelMap: model.thinkingLevelMap === undefined ? "default" : "native",
 		},
 		...(officialMeta?.quality
 			? {

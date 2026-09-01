@@ -42,10 +42,12 @@ export interface ProviderRequestAuth {
 }
 
 export interface ModelFieldSources {
+	cost?: ModelFieldSource;
 	contextWindow?: ModelFieldSource;
 	maxTokens?: ModelFieldSource;
 	input?: ModelFieldSource;
 	reasoning?: ModelFieldSource;
+	thinkingLevelMap?: ModelFieldSource;
 }
 
 export interface ProviderPricingAdjustment {
