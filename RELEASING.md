@@ -6,7 +6,7 @@ This repository publishes from a reviewed jj revision. A `v*` tag triggers `.git
 
 ## Current release state
 
-The one-time bootstrap publication and first OIDC release were completed on 2026-08-16. `0.1.2` is the current published release and the npm `latest` dist-tag. The temporary `0.1.0-oidc-bootstrap.0` registry record is an unsupported historical version and must remain deprecated; it has no Git tag and must not be reused or unpublished.
+The `0.1.8` release is prepared for publication through the reviewed `v0.1.8` tag. The current npm `latest` dist-tag remains `0.1.7` until that workflow completes. The temporary `0.1.0-oidc-bootstrap.0` registry record is an unsupported historical version and must remain deprecated; it has no Git tag and must not be reused or unpublished.
 
 Trusted Publishing is configured for the `hyav/pi-provider` GitHub Actions workflow. Future releases must use a reviewed `v<version>` tag; no local npm token or bootstrap publication is needed.
 
