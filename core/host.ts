@@ -17,7 +17,7 @@ import {
 	type PiProviderRuntimeController,
 	prepareProviderRegistration,
 } from "./extension.ts";
-import { fetchOfficialPricing, type OfficialModelMeta, OPENROUTER_MODELS_URL } from "./official-pricing.ts";
+import { fetchOfficialModelMetadata, type OfficialModelMeta, OPENROUTER_MODELS_URL } from "./official-pricing.ts";
 import type { PreflightAdapter } from "./preflight-manager.ts";
 import { refreshProviderRegistrations } from "./provider-registration.ts";
 import { scheduleModelCatalogRefresh } from "./runtime.ts";
@@ -86,7 +86,7 @@ export function createPiProviderHost(dependencies: Partial<PiProviderDependencie
 			refreshProviderRegistrations(pi, installedDefinition.definition.providers, runtime, snapshot);
 		};
 		const officialPricing = runtime.enableOfficialPricingFallback
-			? fetchOfficialPricingForHost(runtime, { allowNetwork: false })
+			? fetchOfficialModelMetadataForHost(runtime, { allowNetwork: false })
 			: Promise.resolve({});
 		const bridge: StartupBridge = { dependencies: runtime, officialPricing };
 
@@ -98,7 +98,7 @@ export function createPiProviderHost(dependencies: Partial<PiProviderDependencie
 			}
 			const controller = new AbortController();
 			pricingRefreshController = controller;
-			void fetchOfficialPricingForHost(runtime, { signal: controller.signal })
+			void fetchOfficialModelMetadataForHost(runtime, { signal: controller.signal })
 				.then((snapshot) => {
 					if (controller.signal.aborted || disposed) return;
 					onBackgroundRefresh(snapshot);
@@ -465,11 +465,11 @@ export function createPiProviderHost(dependencies: Partial<PiProviderDependencie
 	};
 }
 
-function fetchOfficialPricingForHost(
+function fetchOfficialModelMetadataForHost(
 	runtime: PiProviderDependencies,
 	options: { allowNetwork?: boolean; signal?: AbortSignal } = {},
 ) {
-	return fetchOfficialPricing(
+	return fetchOfficialModelMetadata(
 		runtime.fetch,
 		runtime.officialPricingUrl,
 		runtime.officialPricingTimeoutMs,

@@ -63,7 +63,9 @@ export type {
 export { createModelCatalogLifecycle } from "./core/model-catalog.ts";
 export {
 	applyOfficialModelCosts,
+	applyOfficialModelMetadata,
 	clearPricingCache,
+	fetchOfficialModelMetadata,
 	fetchOfficialPricing,
 	findOfficialCost,
 	findOfficialMeta,
@@ -71,6 +73,7 @@ export {
 	getPricingCache,
 	getPricingCacheAge,
 	type OfficialModelMeta,
+	type OfficialModelMetadataFetchOptions,
 	type OfficialPricingFetchOptions,
 	OPENROUTER_MODELS_URL,
 	parseOpenRouterModels,

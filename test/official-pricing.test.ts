@@ -5,7 +5,9 @@ import { join } from "node:path";
 import test from "node:test";
 import {
 	applyOfficialModelCosts,
+	applyOfficialModelMetadata,
 	clearPricingCache,
+	fetchOfficialModelMetadata,
 	fetchOfficialPricing,
 	findOfficialCost,
 	findOfficialMeta,
@@ -394,6 +396,29 @@ test("applyOfficialModelCosts fills missing cost from dynamic pricing without ov
 	assert.deepEqual(explicitFree[0].cost, { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
 });
 
+test("keeps the legacy apply API equivalent to model metadata enrichment", () => {
+	const models: ProviderModelDraft[] = [
+		{ id: "model-alpha", cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } },
+	];
+	const metadata = {
+		"model-alpha": {
+			cost: { input: 5, output: 30, cacheRead: 0.5, cacheWrite: 6.25 },
+			reasoning: true,
+			input: ["text", "image"] as ("text" | "image")[],
+		},
+	};
+
+	assert.deepEqual(applyOfficialModelCosts(models, metadata), applyOfficialModelMetadata(models, metadata));
+	assert.deepEqual(applyOfficialModelMetadata(models, metadata), [
+		{
+			id: "model-alpha",
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			reasoning: true,
+			input: ["text", "image"],
+		},
+	]);
+});
+
 test("keeps a provider fallback cost instead of replacing it with a generic reference", () => {
 	const processed = applyOfficialModelCosts(
 		[
@@ -472,9 +497,26 @@ test("returns from official pricing after a deadline when fetch ignores cancella
 	}
 });
 
+test("shares cache behavior between the metadata and legacy fetch APIs", async () => {
+	clearPricingCache("https://metadata-api.example/models");
+	let requests = 0;
+	const fetchFn: typeof globalThis.fetch = async () => {
+		requests++;
+		return new Response(
+			JSON.stringify({ data: [{ id: "provider/model", pricing: { prompt: "0.000001", completion: "0.000002" } }] }),
+			{ status: 200 },
+		);
+	};
+
+	const metadata = await fetchOfficialModelMetadata(fetchFn, "https://metadata-api.example/models", 1_000, 60_000);
+	const legacy = await fetchOfficialPricing(fetchFn, "https://metadata-api.example/models", 1_000, 60_000);
+
+	assert.deepEqual(legacy, metadata);
+	assert.equal(requests, 1);
+});
+
 test("fetchOfficialPricing caches successful responses and falls back to last cached snapshot on failure", async () => {
 	clearPricingCache();
-
 	const mockSuccessFetch = async () =>
 		new Response(
 			JSON.stringify({

@@ -3,7 +3,7 @@ import type { PiProviderDefinition } from "./definition.ts";
 import { validatePiProviderDefinition } from "./definition.ts";
 import { LiveCheckManager, type LiveCheckResult } from "./live-check-manager.ts";
 import {
-	fetchOfficialPricing,
+	fetchOfficialModelMetadata,
 	findOfficialMeta,
 	getPricingCacheAge,
 	type OfficialModelMeta,
@@ -467,8 +467,8 @@ export function createPiProviderRuntime(
 		let pricingRefreshController: AbortController | undefined;
 		const cachePath =
 			runtime.officialPricingUrl === OPENROUTER_MODELS_URL ? runtime.openRouterMetadataCachePath : undefined;
-		const fetchPricing = (options: { allowNetwork?: boolean; signal?: AbortSignal } = {}) =>
-			fetchOfficialPricing(
+		const fetchMetadata = (options: { allowNetwork?: boolean; signal?: AbortSignal } = {}) =>
+			fetchOfficialModelMetadata(
 				runtime.fetch,
 				runtime.officialPricingUrl,
 				runtime.officialPricingTimeoutMs,
@@ -478,7 +478,7 @@ export function createPiProviderRuntime(
 				{ cachePath, ...options },
 			);
 		const officialPricingPromise = runtime.enableOfficialPricingFallback
-			? fetchPricing({ allowNetwork: false })
+			? fetchMetadata({ allowNetwork: false })
 			: Promise.resolve({});
 		const definitionPromise = loadDefinition(runtime);
 		const [officialPricing, definition] = await Promise.all([officialPricingPromise, definitionPromise]);
@@ -492,7 +492,7 @@ export function createPiProviderRuntime(
 			}
 			const controller = new AbortController();
 			pricingRefreshController = controller;
-			void fetchPricing({ signal: controller.signal })
+			void fetchMetadata({ signal: controller.signal })
 				.then((snapshot) => {
 					if (disposed || controller.signal.aborted) return;
 					installedController?.updateOfficialPricing?.(snapshot);

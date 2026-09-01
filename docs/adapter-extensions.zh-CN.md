@@ -95,6 +95,8 @@ export default defineProviderExtension({
 
 动态 Provider Adapter 可以使用公开的 `createModelCatalogLifecycle()` helper 处理快照恢复、TTL、受 generation guard 保护的发布、持久化失败降级、在线目录完整替换，以及刷新失败时保留最近一次成功目录。Adapter 仍负责端点鉴权、响应解析与校验、缓存模型转换、错误码映射，并通过 `onUpdate` 将模型赋给 Provider 定义。`initialModels` 表示显式静态兜底；省略时初始来源为 `"empty"`。恢复的快照标记为 `"cached"`，成功发布的在线目录标记为 `"live"`。即使调用者使用不同 signal，同一 Provider 的所有并发调用也最多共享一个目录发现请求。取消单个调用者只停止该调用者的等待，不会取消有界的共享请求或影响其他调用者。受 generation guard 保护的发布尝试会串行执行，因此旧调用者被拒绝后，较新的有效调用者仍可发布结果。成功目录 TTL 与失败重试计时相互独立：失败默认从 30 秒开始指数退避，最高 15 分钟，可通过 `failureBackoffMs` 和 `maxFailureBackoffMs` 调整；`force` 会同时绕过 TTL 与失败退避。目录诊断会公开最近成功刷新、最近尝试、连续失败次数和下次重试时间。Discovery 函数既可返回模型数组，也可返回 `{ models, diagnostics }`；诊断只支持非负安全整数 `rejectedCount` 和 `duplicateCount`。这些计数只随通过 generation guard 的目录一起发布，绝不包含被拒绝的 ID、payload 片段或响应正文。
 
+OpenRouter 补全通过 `fetchOfficialModelMetadata()` 和 `applyOfficialModelMetadata()` 以模型元数据 API 形式公开。它只为 Provider 已提供的模型补齐缺失的价格、能力、身份和质量字段，绝不会创建 Provider 模型。旧的 `fetchOfficialPricing()` 和 `applyOfficialModelCosts()` 名称继续作为 deprecated 兼容包装保留，参数、缓存文件和结果均不变。
+
 其他目录分别使用 `defineStatusExtension`、`definePreflightExtension` 和 `defineTunerExtension`。身份元数据必须静态提供：
 
 - Provider: `id`

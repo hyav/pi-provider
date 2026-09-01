@@ -1,6 +1,6 @@
 import type { ProviderConfig } from "@earendil-works/pi-coding-agent";
 import { validateProviderModelDrafts } from "./adapter-validation.ts";
-import { applyOfficialModelCosts, findOfficialMeta, type OfficialModelMeta } from "./official-pricing.ts";
+import { applyOfficialModelMetadata, findOfficialMeta, type OfficialModelMeta } from "./official-pricing.ts";
 import { resolvePricingDetails } from "./pricing-adjustments.ts";
 import type { PiProviderDependencies } from "./runtime-config.ts";
 import type {
@@ -121,7 +121,7 @@ function resolveModelRegistration(
 	officialPricing: Record<string, OfficialModelMeta>,
 ): { models: ProviderModel[]; modelMetadata: Record<string, ProviderModelMetadata> } {
 	validateProviderModelDrafts(modelDrafts, `Provider ${adapter.id}`);
-	const enrichedDrafts = applyOfficialModelCosts(modelDrafts, officialPricing);
+	const enrichedDrafts = applyOfficialModelMetadata(modelDrafts, officialPricing);
 	const pricingPolicy = runtime.pricingPolicies?.[adapter.id] ?? adapter.pricing;
 	const metadata: Record<string, ProviderModelMetadata> = {};
 	const adjustedDrafts = enrichedDrafts.map((model, index) => {

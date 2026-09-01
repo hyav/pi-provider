@@ -41,7 +41,7 @@ export interface OfficialModelMeta {
 	};
 }
 
-export interface OfficialPricingFetchOptions {
+export interface OfficialModelMetadataFetchOptions {
 	/** Optional persistent cache file. Omit for process-only caching (for example, in unit tests). */
 	cachePath?: string;
 	/** Return the current snapshot immediately and refresh an expired/missing cache in the background. */
@@ -53,6 +53,9 @@ export interface OfficialPricingFetchOptions {
 	/** Cancel network access owned by the caller's lifecycle. */
 	signal?: AbortSignal;
 }
+
+/** @deprecated Use OfficialModelMetadataFetchOptions. */
+export type OfficialPricingFetchOptions = OfficialModelMetadataFetchOptions;
 
 interface PricingCacheEntry {
 	snapshot: Record<string, OfficialModelMeta>;
@@ -659,14 +662,14 @@ function observeBackgroundRefresh(
 	);
 }
 
-export async function fetchOfficialPricing(
+export async function fetchOfficialModelMetadata(
 	fetchFn: typeof globalThis.fetch,
 	pricingUrl = OPENROUTER_MODELS_URL,
 	timeoutMs = 3_000,
 	cacheTtlMs = DEFAULT_PRICING_CACHE_TTL_MS,
 	maxStaleMs = DEFAULT_PRICING_MAX_STALE_MS,
 	now: () => number = Date.now,
-	options: OfficialPricingFetchOptions = {},
+	options: OfficialModelMetadataFetchOptions = {},
 ): Promise<Record<string, OfficialModelMeta>> {
 	const currentTime = now();
 	const cachedAge = getPricingCacheAge(pricingUrl, currentTime);
@@ -713,6 +716,19 @@ export async function fetchOfficialPricing(
 		return getPricingCache(pricingUrl);
 	}
 	return request;
+}
+
+/** @deprecated Use fetchOfficialModelMetadata. */
+export function fetchOfficialPricing(
+	fetchFn: typeof globalThis.fetch,
+	pricingUrl = OPENROUTER_MODELS_URL,
+	timeoutMs = 3_000,
+	cacheTtlMs = DEFAULT_PRICING_CACHE_TTL_MS,
+	maxStaleMs = DEFAULT_PRICING_MAX_STALE_MS,
+	now: () => number = Date.now,
+	options: OfficialPricingFetchOptions = {},
+): Promise<Record<string, OfficialModelMeta>> {
+	return fetchOfficialModelMetadata(fetchFn, pricingUrl, timeoutMs, cacheTtlMs, maxStaleMs, now, options);
 }
 
 export function findOfficialCost(
@@ -868,12 +884,12 @@ export function findOfficialMeta(
 	return result;
 }
 
-export function applyOfficialModelCosts(
+export function applyOfficialModelMetadata(
 	models: ProviderModelDraft[],
-	dynamicPricing: Record<string, OfficialModelMeta | ProviderCost> = {},
+	dynamicMetadata: Record<string, OfficialModelMeta | ProviderCost> = {},
 ): ProviderModelDraft[] {
 	return models.map((model) => {
-		const meta = findOfficialMeta(model.id, dynamicPricing);
+		const meta = findOfficialMeta(model.id, dynamicMetadata);
 		if (!meta) return model;
 
 		const useOfficialCost =
@@ -896,4 +912,12 @@ export function applyOfficialModelCosts(
 		if (meta.compat !== undefined) merged.compat = { ...meta.compat, ...merged.compat };
 		return merged;
 	});
+}
+
+/** @deprecated Use applyOfficialModelMetadata. */
+export function applyOfficialModelCosts(
+	models: ProviderModelDraft[],
+	dynamicPricing: Record<string, OfficialModelMeta | ProviderCost> = {},
+): ProviderModelDraft[] {
+	return applyOfficialModelMetadata(models, dynamicPricing);
 }
