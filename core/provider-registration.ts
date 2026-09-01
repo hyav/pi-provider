@@ -114,12 +114,58 @@ function selectPricingAdjustment(
 	return model.pricingAdjustment ?? policy?.models?.[model.id.trim()] ?? policy?.defaultAdjustment;
 }
 
+function costsEqual(left: ProviderModelDraft["cost"], right: ProviderCost): boolean {
+	if (left === undefined) return false;
+	const candidate = left as Partial<ProviderCost>;
+	if (
+		candidate.input !== right.input ||
+		candidate.output !== right.output ||
+		candidate.cacheRead !== right.cacheRead ||
+		candidate.cacheWrite !== right.cacheWrite
+	) {
+		return false;
+	}
+	const leftTiers = candidate.tiers ?? [];
+	const rightTiers = right.tiers ?? [];
+	return (
+		leftTiers.length === rightTiers.length &&
+		leftTiers.every((tier, index) => {
+			const normalized = rightTiers[index];
+			return (
+				normalized !== undefined &&
+				tier.inputTokensAbove === normalized.inputTokensAbove &&
+				tier.input === normalized.input &&
+				tier.output === normalized.output &&
+				tier.cacheRead === normalized.cacheRead &&
+				tier.cacheWrite === normalized.cacheWrite
+			);
+		})
+	);
+}
+
+function inputsEqual(left: ProviderModelDraft["input"], right: ProviderModel["input"]): boolean {
+	return Array.isArray(left) && left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
 function getDraftCostSource(
 	draft: ProviderModelDraft | undefined,
 	officialMeta: OfficialModelMeta | undefined,
-): ProviderPricingSource | "default" {
-	if (draft?.cost !== undefined) return draft.pricingSource ?? "provider";
-	return officialMeta?.costKnown !== false && officialMeta?.cost !== undefined ? "official" : "default";
+	normalizedCost: ProviderCost,
+): ProviderPricingSource | "default" | "normalized" {
+	const candidate = draft?.cost ?? (officialMeta?.costKnown !== false ? officialMeta?.cost : undefined);
+	if (candidate === undefined) return "default";
+	if (!costsEqual(candidate, normalizedCost)) return "normalized";
+	return draft?.cost !== undefined ? (draft.pricingSource ?? "provider") : "official";
+}
+
+function getFieldSource(
+	providerValue: unknown,
+	officialValue: unknown,
+	wasNormalized: boolean,
+): "provider" | "official" | "default" | "normalized" {
+	if (providerValue === undefined && officialValue === undefined) return "default";
+	if (wasNormalized) return "normalized";
+	return providerValue !== undefined ? "provider" : "official";
 }
 
 function resolveModelRegistration(
@@ -136,42 +182,39 @@ function resolveModelRegistration(
 		const modelId = model.id.trim();
 		const originalDraft = modelDrafts[index];
 		const officialMeta = findOfficialMeta(modelId, officialPricing);
+		const normalizedModel = normalizeProviderModel(model);
+		const normalizedCost = normalizeCost(model.cost);
 		const fieldSources = {
-			cost: getDraftCostSource(originalDraft, officialMeta),
-			contextWindow:
-				originalDraft?.contextWindow !== undefined
-					? ("provider" as const)
-					: officialMeta?.contextWindow !== undefined
-						? ("official" as const)
-						: ("default" as const),
-			maxTokens:
-				originalDraft?.maxTokens !== undefined
-					? ("provider" as const)
-					: officialMeta?.maxTokens !== undefined
-						? ("official" as const)
-						: ("default" as const),
-			input:
-				originalDraft?.input !== undefined
-					? ("provider" as const)
-					: officialMeta?.input !== undefined
-						? ("official" as const)
-						: ("default" as const),
-			reasoning:
-				originalDraft?.reasoning !== undefined
-					? ("provider" as const)
-					: officialMeta?.reasoning !== undefined
-						? ("official" as const)
-						: ("default" as const),
-			thinkingLevelMap:
-				originalDraft?.thinkingLevelMap !== undefined
-					? ("provider" as const)
-					: officialMeta?.thinkingLevelMap !== undefined
-						? ("official" as const)
-						: ("default" as const),
+			cost: getDraftCostSource(originalDraft, officialMeta, normalizedCost),
+			contextWindow: getFieldSource(
+				originalDraft?.contextWindow,
+				officialMeta?.contextWindow,
+				model.contextWindow !== undefined && model.contextWindow !== normalizedModel.contextWindow,
+			),
+			maxTokens: getFieldSource(
+				originalDraft?.maxTokens,
+				officialMeta?.maxTokens,
+				model.maxTokens !== undefined && model.maxTokens !== normalizedModel.maxTokens,
+			),
+			input: getFieldSource(
+				originalDraft?.input,
+				officialMeta?.input,
+				model.input !== undefined && !inputsEqual(model.input, normalizedModel.input),
+			),
+			reasoning: getFieldSource(
+				originalDraft?.reasoning,
+				officialMeta?.reasoning,
+				model.reasoning !== undefined && model.reasoning !== normalizedModel.reasoning,
+			),
+			thinkingLevelMap: getFieldSource(originalDraft?.thinkingLevelMap, officialMeta?.thinkingLevelMap, false),
 		};
 		const source: ProviderPricingSource | "none" =
 			model.cost === undefined ? "none" : (model.pricingSource ?? "provider");
-		const pricing = resolvePricingDetails(model.cost, source, selectPricingAdjustment(adapter, model, pricingPolicy));
+		const pricing = resolvePricingDetails(
+			model.cost === undefined ? undefined : normalizedCost,
+			source,
+			selectPricingAdjustment(adapter, model, pricingPolicy),
+		);
 		metadata[modelId] = {
 			pricing,
 			fieldSources,

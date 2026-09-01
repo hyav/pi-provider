@@ -177,7 +177,9 @@ function formatModelFieldSource(source: ModelFieldSource | undefined): string {
 					? "OpenRouter"
 					: source === "fallback"
 						? "Provider fallback"
-						: "Pi default";
+						: source === "normalized"
+							? "Normalized catalog value"
+							: "Pi default";
 	return ` · ${label}`;
 }
 

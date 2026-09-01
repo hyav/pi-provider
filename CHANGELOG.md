@@ -12,6 +12,7 @@ This file is the authoritative user-facing release history for `@hyav/pi-provide
 - Report bounded invalid and duplicate model counts for accepted online catalogs without retaining remote model IDs or payload content.
 - Add accurately named OpenRouter metadata APIs (`fetchOfficialModelMetadata()` and `applyOfficialModelMetadata()`), migrate internal callers, and retain the pricing-named APIs as deprecated compatibility wrappers.
 - Extend field-level provenance to normalized cost and thinking-level maps while keeping `pricing.source` authoritative for known and effective pricing.
+- Normalize partial model costs before applying pricing adjustments so registered model costs and pricing sidecars remain consistent; report fields rewritten at the registration boundary as `normalized`.
 
 ## 0.1.7 - 2026-08-24
 

@@ -254,6 +254,46 @@ test("records default sources when cost and thinking metadata are unavailable", 
 	assert.equal(metadata?.pricing.known, false);
 });
 
+test("normalizes incomplete costs before calculating pricing adjustments", () => {
+	const adapter = providerAdapter();
+	adapter.pricing = undefined;
+	adapter.provider.models = [
+		{
+			id: "partial-cost-model",
+			cost: { input: 1 } as any,
+			pricingAdjustment: { multiplier: 0.8, label: "20% discount" },
+		},
+	];
+	const registered = prepareProviderRegistration(adapter, getDefaultPiProviderDependencies());
+	const cost = registered.models?.[0]?.cost;
+	const pricing = adapter.registration?.modelMetadata?.["partial-cost-model"]?.pricing;
+
+	assert.deepEqual(cost, { input: 0.8, output: 0, cacheRead: 0, cacheWrite: 0 });
+	assert.deepEqual(pricing?.baseCost, { input: 1, output: 0, cacheRead: 0, cacheWrite: 0 });
+	assert.deepEqual(pricing?.effectiveCost, cost);
+	assert.equal(pricing?.known, true);
+	assert.ok(cost && Object.values(cost).every((value) => typeof value === "number" && Number.isFinite(value)));
+	assert.equal(adapter.registration?.modelMetadata?.["partial-cost-model"]?.fieldSources?.cost, "normalized");
+});
+
+test("reports normalized sources for fields changed by model registration", () => {
+	const adapter = providerAdapter();
+	adapter.pricing = undefined;
+	adapter.provider.models = [
+		{
+			id: "normalized-model",
+			input: [],
+			contextWindow: 100_000,
+			maxTokens: 200_000,
+		},
+	];
+	prepareProviderRegistration(adapter, getDefaultPiProviderDependencies());
+
+	assert.deepEqual(adapter.registration?.normalizedModels[0]?.input, ["text"]);
+	assert.equal(adapter.registration?.normalizedModels[0]?.maxTokens, 100_000);
+	assert.equal(adapter.registration?.modelMetadata?.["normalized-model"]?.fieldSources?.input, "normalized");
+	assert.equal(adapter.registration?.modelMetadata?.["normalized-model"]?.fieldSources?.maxTokens, "normalized");
+});
 test("preserves an explicit Provider zero price", () => {
 	const adapter = providerAdapter();
 	adapter.pricing = undefined;

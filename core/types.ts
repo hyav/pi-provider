@@ -14,7 +14,7 @@ export type PricingSku = "input" | "output" | "cacheRead" | "cacheWrite";
 /** Pricing provenance used by Pi Provider sidecars; not added to Pi model objects. */
 export type ProviderPricingSource = "provider" | "fallback" | "official";
 export type ModelPricingSource = ProviderPricingSource | "native";
-export type ModelFieldSource = ProviderPricingSource | "native" | "default";
+export type ModelFieldSource = ProviderPricingSource | "native" | "default" | "normalized";
 export type ModelMetadataState = "fresh" | "stale" | "checking" | "unavailable";
 
 export interface ModelMetadataStatus {
