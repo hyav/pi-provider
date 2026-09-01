@@ -77,10 +77,49 @@ test("publishes a complete live replacement and persists it", async () => {
 		lastSuccessfulRefreshAt: 20,
 		lastAttemptAt: 20,
 		consecutiveFailures: 0,
+		rejectedCount: 0,
+		duplicateCount: 0,
 		nextRetryAt: undefined,
 		lastError: undefined,
 	});
 	assert.deepEqual(await lifecycle.refreshModels(context({ allowNetwork: true })), [{ id: "current" }]);
+});
+
+test("publishes discovery diagnostics only with the accepted catalog", async () => {
+	const lifecycle = createModelCatalogLifecycle({
+		ttlMs: 100,
+		discover: async () => ({
+			models: [{ id: "current" }],
+			diagnostics: { rejectedCount: 2, duplicateCount: 1 },
+		}),
+		restore: () => undefined,
+		persist: (models, checkedAt) => stored(models, checkedAt),
+		onUpdate: () => {},
+		errorCode: () => "fetch",
+	});
+
+	await lifecycle.refreshModels(context({ allowNetwork: true, publish: async () => false }));
+	assert.equal(lifecycle.catalog.rejectedCount, undefined);
+	assert.equal(lifecycle.catalog.duplicateCount, undefined);
+
+	await lifecycle.refreshModels(context({ allowNetwork: true, force: true }));
+	assert.equal(lifecycle.catalog.rejectedCount, 2);
+	assert.equal(lifecycle.catalog.duplicateCount, 1);
+});
+
+test("rejects invalid discovery diagnostics", async () => {
+	const lifecycle = createModelCatalogLifecycle({
+		ttlMs: 100,
+		discover: async () => ({ models: [{ id: "model" }], diagnostics: { rejectedCount: -1 } }),
+		restore: () => undefined,
+		persist: (models, checkedAt) => stored(models, checkedAt),
+		onUpdate: () => {},
+		errorCode: () => "badjson",
+	});
+
+	await assert.rejects(lifecycle.refreshModels(context({ allowNetwork: true })), /non-negative safe integer/);
+	assert.equal(lifecycle.catalog.lastError, "badjson");
+	assert.equal(lifecycle.catalog.rejectedCount, undefined);
 });
 
 test("falls back to a generation-checked in-memory update when persistence fails", async () => {

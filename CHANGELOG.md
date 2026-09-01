@@ -9,6 +9,7 @@ This file is the authoritative user-facing release history for `@hyav/pi-provide
 - Add a public model-catalog lifecycle helper for cached snapshot restoration, TTL checks, generation-guarded publication, persistence fallback, complete live replacement, and failure retention; migrate Charm Hyper to it.
 - Share one model-catalog discovery request across concurrent callers with different cancellation signals, while keeping caller cancellation and generation-guarded publication independent.
 - Separate successful-catalog TTL from exponential failure backoff, expose attempt, success, failure-count, and retry diagnostics, and show retry timing in `/status`.
+- Report bounded invalid and duplicate model counts for accepted online catalogs without retaining remote model IDs or payload content.
 
 ## 0.1.7 - 2026-08-24
 

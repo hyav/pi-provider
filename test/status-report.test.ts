@@ -105,6 +105,8 @@ test("shows model catalog retry backoff diagnostics", () => {
 				source: "cached",
 				modelCount: 1,
 				updatedAt: now - 60_000,
+				rejectedCount: 3,
+				duplicateCount: 1,
 				lastError: "fetch",
 				consecutiveFailures: 2,
 				nextRetryAt: now + 30_000,
@@ -123,6 +125,7 @@ test("shows model catalog retry backoff diagnostics", () => {
 	);
 
 	assert.match(result.report, /Status: stale · cached · 1m ago/);
+	assert.match(result.report, /Skipped: 3 invalid · 1 duplicate/);
 	assert.match(result.report, /Error: fetch/);
 	assert.match(result.report, /Retry: in 30s · 2 consecutive failures/);
 });

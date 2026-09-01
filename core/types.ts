@@ -122,6 +122,8 @@ export interface ModelCatalogStatus {
 	lastAttemptAt?: number;
 	consecutiveFailures?: number;
 	nextRetryAt?: number;
+	rejectedCount?: number;
+	duplicateCount?: number;
 	lastError?: string;
 }
 

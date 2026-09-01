@@ -279,6 +279,11 @@ function formatCatalog(
 	const statusParts = freshness ? [freshness, source] : [source];
 	if (catalog?.updatedAt !== undefined) statusParts.push(formatAge(now, catalog.updatedAt));
 	const lines = [`Status: ${statusParts.join(" · ")}`, `Models: ${count}`];
+	const rejectedCount = catalog?.rejectedCount ?? 0;
+	const duplicateCount = catalog?.duplicateCount ?? 0;
+	if (rejectedCount > 0 || duplicateCount > 0) {
+		lines.push(`Skipped: ${rejectedCount} invalid · ${duplicateCount} duplicate`);
+	}
 	if (catalog?.lastError) lines.push(`Error: ${catalog.lastError}`);
 	if (catalog?.lastError && catalog.nextRetryAt !== undefined) {
 		const failures = catalog.consecutiveFailures ?? 1;

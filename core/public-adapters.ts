@@ -29,7 +29,12 @@ export {
 	mergeDiagnosticHeaders,
 } from "./diagnostic-auth.ts";
 export { isProviderDataError, ProviderDataError } from "./errors.ts";
-export type { ModelCatalogLifecycle, ModelCatalogLifecycleOptions } from "./model-catalog.ts";
+export type {
+	ModelCatalogDiagnostics,
+	ModelCatalogDiscoveryResult,
+	ModelCatalogLifecycle,
+	ModelCatalogLifecycleOptions,
+} from "./model-catalog.ts";
 export { createModelCatalogLifecycle } from "./model-catalog.ts";
 export { createOpenCodeCatalogPreflightAdapter } from "./opencode-preflight.ts";
 export type {

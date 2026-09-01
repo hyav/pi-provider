@@ -193,6 +193,66 @@ test("skips malformed current Hyper models while retaining valid entries", () =>
 	);
 });
 
+test("reports invalid and duplicate current-schema models", async () => {
+	const validModel = {
+		id: "current-model",
+		name: "Current Model",
+		cost_per_1m_in: 1,
+		cost_per_1m_out: 2,
+		cost_per_1m_in_cached: 0,
+		context_window: 128_000,
+		default_max_tokens: 16_384,
+		can_reason: false,
+		supports_attachments: false,
+	};
+	const adapter = createCharmHyperAdapter(
+		async () =>
+			new Response(
+				JSON.stringify({
+					models: [validModel, { ...validModel, id: "CURRENT-MODEL" }, { id: "invalid-model" }],
+				}),
+				{ status: 200 },
+			),
+		100,
+	);
+	const refreshModels = adapter.provider.refreshModels;
+	assert.ok(refreshModels);
+
+	await refreshModels(refreshContext({ allowNetwork: true, force: true }));
+
+	assert.equal(adapter.catalog?.rejectedCount, 1);
+	assert.equal(adapter.catalog?.duplicateCount, 1);
+});
+
+test("reports invalid and duplicate legacy models from a successful catalog", async () => {
+	const adapter = createCharmHyperAdapter(
+		async () =>
+			new Response(
+				JSON.stringify({
+					data: [
+						{ id: "valid-model" },
+						{ id: "VALID-MODEL" },
+						{ id: "" },
+						{ id: "invalid-window", context_window: -1 },
+					],
+				}),
+				{ status: 200 },
+			),
+		100,
+	);
+	const refreshModels = adapter.provider.refreshModels;
+	assert.ok(refreshModels);
+
+	await refreshModels(refreshContext({ allowNetwork: true, force: true }));
+
+	assert.deepEqual(
+		adapter.provider.models.map(({ id }) => id),
+		["valid-model"],
+	);
+	assert.equal(adapter.catalog?.rejectedCount, 2);
+	assert.equal(adapter.catalog?.duplicateCount, 1);
+});
+
 test("sends a versioned User-Agent for Hyper model discovery", async () => {
 	let userAgent: string | null = null;
 	const adapter = createCharmHyperAdapter(async (_input, init) => {

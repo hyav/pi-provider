@@ -167,12 +167,11 @@ export function validateProviderAdapter(adapter: unknown): asserts adapter is Pr
 				assertFiniteNonNegative(adapter.catalog[field], `Catalog ${field}`);
 			}
 		}
-		const consecutiveFailures = adapter.catalog.consecutiveFailures;
-		if (
-			consecutiveFailures !== undefined &&
-			(typeof consecutiveFailures !== "number" || !Number.isInteger(consecutiveFailures) || consecutiveFailures < 0)
-		) {
-			throw new Error(`Provider ${adapter.id} has invalid catalog failure count`);
+		for (const field of ["consecutiveFailures", "rejectedCount", "duplicateCount"] as const) {
+			const count = adapter.catalog[field];
+			if (count !== undefined && (typeof count !== "number" || !Number.isSafeInteger(count) || count < 0)) {
+				throw new Error(`Provider ${adapter.id} has invalid catalog ${field}`);
+			}
 		}
 		if (adapter.catalog.lastError !== undefined && !isSafeText(adapter.catalog.lastError)) {
 			throw new Error(`Provider ${adapter.id} has invalid catalog error`);

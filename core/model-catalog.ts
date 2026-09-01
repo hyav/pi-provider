@@ -1,5 +1,15 @@
 import type { ModelCatalogSource, ModelCatalogStatus, ProviderModelDraft, ProviderRefreshContext } from "./types.ts";
 
+export interface ModelCatalogDiagnostics {
+	rejectedCount?: number;
+	duplicateCount?: number;
+}
+
+export interface ModelCatalogDiscoveryResult {
+	models: ProviderModelDraft[];
+	diagnostics?: ModelCatalogDiagnostics;
+}
+
 export interface ModelCatalogLifecycleOptions {
 	initialModels?: ProviderModelDraft[];
 	initialSource?: ModelCatalogSource;
@@ -7,7 +17,9 @@ export interface ModelCatalogLifecycleOptions {
 	failureBackoffMs?: number;
 	maxFailureBackoffMs?: number;
 	now?: () => number;
-	discover(context: ProviderRefreshContext): Promise<ProviderModelDraft[]>;
+	discover(
+		context: ProviderRefreshContext,
+	): Promise<ProviderModelDraft[] | ModelCatalogDiscoveryResult> | ProviderModelDraft[] | ModelCatalogDiscoveryResult;
 	restore(stored: ProviderRefreshContext["stored"]): ProviderModelDraft[] | undefined;
 	persist(models: ProviderModelDraft[], checkedAt: number): NonNullable<ProviderRefreshContext["stored"]>;
 	onUpdate(models: ProviderModelDraft[]): void;
@@ -78,8 +90,35 @@ function finiteNonNegative(value: number | undefined, fallback: number, label: s
 	return resolved;
 }
 
+interface NormalizedCatalogDiscoveryResult {
+	models: ProviderModelDraft[];
+	diagnostics: Required<ModelCatalogDiagnostics>;
+}
+
+function diagnosticCount(value: number | undefined, label: string): number {
+	const count = value ?? 0;
+	if (!Number.isSafeInteger(count) || count < 0) {
+		throw new RangeError(`Model catalog ${label} must be a non-negative safe integer`);
+	}
+	return count;
+}
+
+function normalizeDiscoveryResult(
+	result: ProviderModelDraft[] | ModelCatalogDiscoveryResult,
+): NormalizedCatalogDiscoveryResult {
+	const models = Array.isArray(result) ? result : result.models;
+	const diagnostics = Array.isArray(result) ? undefined : result.diagnostics;
+	return {
+		models,
+		diagnostics: {
+			rejectedCount: diagnosticCount(diagnostics?.rejectedCount, "rejected count"),
+			duplicateCount: diagnosticCount(diagnostics?.duplicateCount, "duplicate count"),
+		},
+	};
+}
+
 interface ActiveCatalogRefresh {
-	request: Promise<ProviderModelDraft[]>;
+	request: Promise<NormalizedCatalogDiscoveryResult>;
 	publication: Promise<void>;
 	waiters: number;
 	settled: boolean;
@@ -111,11 +150,18 @@ export function createModelCatalogLifecycle(options: ModelCatalogLifecycleOption
 		consecutiveFailures: 0,
 	};
 
-	const applyModels = (nextModels: ProviderModelDraft[], source: ModelCatalogSource, updatedAt?: number) => {
+	const applyModels = (
+		nextModels: ProviderModelDraft[],
+		source: ModelCatalogSource,
+		updatedAt?: number,
+		diagnostics: Required<ModelCatalogDiagnostics> = { rejectedCount: 0, duplicateCount: 0 },
+	) => {
 		models = [...nextModels];
 		options.onUpdate(models);
 		catalog.source = source;
 		catalog.modelCount = models.length;
+		catalog.rejectedCount = diagnostics.rejectedCount;
+		catalog.duplicateCount = diagnostics.duplicateCount;
 		catalog.lastError = undefined;
 		catalog.consecutiveFailures = 0;
 		catalog.nextRetryAt = undefined;
@@ -153,7 +199,10 @@ export function createModelCatalogLifecycle(options: ModelCatalogLifecycleOption
 
 	const startRefresh = (context: ProviderRefreshContext): ActiveCatalogRefresh => {
 		const active: ActiveCatalogRefresh = {
-			request: Promise.resolve([]),
+			request: Promise.resolve({
+				models: [],
+				diagnostics: { rejectedCount: 0, duplicateCount: 0 },
+			}),
 			publication: Promise.resolve(),
 			waiters: 0,
 			settled: false,
@@ -164,6 +213,7 @@ export function createModelCatalogLifecycle(options: ModelCatalogLifecycleOption
 		catalog.lastAttemptAt = now();
 		active.request = Promise.resolve()
 			.then(() => options.discover(sharedContext))
+			.then(normalizeDiscoveryResult)
 			.catch((error: unknown) => {
 				recordFailure(active, error);
 				throw error;
@@ -197,17 +247,17 @@ export function createModelCatalogLifecycle(options: ModelCatalogLifecycleOption
 		const active = inFlight ?? startRefresh(context);
 		active.waiters++;
 		try {
-			const refreshed = await waitForCaller(active.request, context.signal);
+			const discovered = await waitForCaller(active.request, context.signal);
 			const attempt = active.publication.then(async () => {
 				if (active.applied || context.signal.aborted) return;
 				const updatedAt = now();
 				await publish(
 					context,
 					() => {
-						applyModels(refreshed, "live", updatedAt);
+						applyModels(discovered.models, "live", updatedAt, discovered.diagnostics);
 						active.applied = true;
 					},
-					options.persist(refreshed, updatedAt),
+					options.persist(discovered.models, updatedAt),
 				);
 			});
 			active.publication = attempt.catch(() => undefined);

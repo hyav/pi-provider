@@ -1,4 +1,5 @@
 import type {
+	ModelCatalogDiscoveryResult,
 	ProviderAdapter,
 	ProviderModel,
 	ProviderModelDraft,
@@ -148,38 +149,78 @@ function parseCurrentHyperModel(value: unknown): ProviderModelDraft | undefined 
 	return mapped;
 }
 
-function parseCurrentHyperModels(payload: Record<string, unknown>): ProviderModelDraft[] | undefined {
+interface ParsedHyperCatalog {
+	models: ProviderModelDraft[];
+	diagnostics: {
+		rejectedCount: number;
+		duplicateCount: number;
+	};
+}
+
+function parseCurrentHyperModels(payload: Record<string, unknown>): ParsedHyperCatalog | undefined {
 	if (!Array.isArray(payload.models)) return undefined;
-	if (payload.models.length > MAX_PROVIDER_MODEL_COUNT) return [];
+	if (payload.models.length > MAX_PROVIDER_MODEL_COUNT) {
+		return { models: [], diagnostics: { rejectedCount: payload.models.length, duplicateCount: 0 } };
+	}
 	const models: ProviderModelDraft[] = [];
 	const seenIds = new Set<string>();
+	let rejectedCount = 0;
+	let duplicateCount = 0;
 	for (const value of payload.models) {
 		const model = parseCurrentHyperModel(value);
-		if (model === undefined) continue;
+		if (model === undefined) {
+			rejectedCount++;
+			continue;
+		}
 		const normalizedId = model.id.toLowerCase();
-		if (seenIds.has(normalizedId)) continue;
+		if (seenIds.has(normalizedId)) {
+			duplicateCount++;
+			continue;
+		}
 		seenIds.add(normalizedId);
 		models.push(model);
 	}
-	return models;
+	return { models, diagnostics: { rejectedCount, duplicateCount } };
 }
 
-function parseLegacyHyperModels(payload: Record<string, unknown>): ProviderModelDraft[] {
-	if (!Array.isArray(payload.data) || payload.data.length > MAX_PROVIDER_MODEL_COUNT) return [];
+function parseLegacyHyperModels(payload: Record<string, unknown>): ParsedHyperCatalog {
+	if (!Array.isArray(payload.data)) {
+		return { models: [], diagnostics: { rejectedCount: 0, duplicateCount: 0 } };
+	}
+	if (payload.data.length > MAX_PROVIDER_MODEL_COUNT) {
+		return { models: [], diagnostics: { rejectedCount: payload.data.length, duplicateCount: 0 } };
+	}
 	const models: ProviderModelDraft[] = [];
 	const seenIds = new Set<string>();
+	let rejectedCount = 0;
+	let duplicateCount = 0;
 
 	for (const value of payload.data) {
-		if (!isRecord(value) || typeof value.id !== "string" || value.id.trim() === "") continue;
+		if (!isRecord(value) || typeof value.id !== "string" || value.id.trim() === "") {
+			rejectedCount++;
+			continue;
+		}
 		const id = value.id.trim();
 		const normalizedId = id.toLowerCase();
-		if (seenIds.has(normalizedId)) continue;
-		if (value.context_window !== undefined && !isPositiveInteger(value.context_window)) continue;
-		if (value.max_output_tokens !== undefined && !isPositiveInteger(value.max_output_tokens)) continue;
+		if (value.context_window !== undefined && !isPositiveInteger(value.context_window)) {
+			rejectedCount++;
+			continue;
+		}
+		if (value.max_output_tokens !== undefined && !isPositiveInteger(value.max_output_tokens)) {
+			rejectedCount++;
+			continue;
+		}
 
 		const contextWindow = isPositiveInteger(value.context_window) ? value.context_window : undefined;
 		const maxTokens = isPositiveInteger(value.max_output_tokens) ? value.max_output_tokens : undefined;
-		if (contextWindow !== undefined && maxTokens !== undefined && maxTokens > contextWindow) continue;
+		if (contextWindow !== undefined && maxTokens !== undefined && maxTokens > contextWindow) {
+			rejectedCount++;
+			continue;
+		}
+		if (seenIds.has(normalizedId)) {
+			duplicateCount++;
+			continue;
+		}
 		const reasoning = isRecord(value.reasoning) ? value.reasoning : undefined;
 		const capabilities = isRecord(value.capabilities) ? value.capabilities : undefined;
 		const reasoningEffortLevels = readEffortLevels(value);
@@ -223,20 +264,23 @@ function parseLegacyHyperModels(payload: Record<string, unknown>): ProviderModel
 		models.push(mapped);
 		seenIds.add(normalizedId);
 	}
-	return models;
+	return { models, diagnostics: { rejectedCount, duplicateCount } };
+}
+
+function parseHyperCatalog(payload: unknown): ParsedHyperCatalog {
+	if (!isRecord(payload)) return { models: [], diagnostics: { rejectedCount: 0, duplicateCount: 0 } };
+	return parseCurrentHyperModels(payload) ?? parseLegacyHyperModels(payload);
 }
 
 export function parseHyperModels(payload: unknown): ProviderModelDraft[] {
-	if (!isRecord(payload)) return [];
-	const currentModels = parseCurrentHyperModels(payload);
-	return currentModels ?? parseLegacyHyperModels(payload);
+	return parseHyperCatalog(payload).models;
 }
 
 async function discoverHyperModels(
 	fetchFn: typeof globalThis.fetch,
 	timeoutMs: number,
 	externalSignal?: AbortSignal,
-): Promise<ProviderModelDraft[]> {
+): Promise<ModelCatalogDiscoveryResult> {
 	return withDeadline(
 		async (signal) => {
 			let endpoint = HYPER_PROVIDER_URL;
@@ -260,12 +304,12 @@ async function discoverHyperModels(
 					"badjson",
 				);
 			}
-			const models = parseHyperModels(payload);
-			if (models.length === 0) {
+			const parsed = parseHyperCatalog(payload);
+			if (parsed.models.length === 0) {
 				throw new ProviderDataError("Charm Hyper model discovery returned no valid models", "badjson");
 			}
-			normalizeProviderModels(models);
-			return models;
+			normalizeProviderModels(parsed.models);
+			return parsed;
 		},
 		timeoutMs,
 		externalSignal,

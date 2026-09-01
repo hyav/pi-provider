@@ -53,6 +53,8 @@ test("validates model catalog retry diagnostics", () => {
 			lastAttemptAt: 2,
 			consecutiveFailures: 2,
 			nextRetryAt: 3,
+			rejectedCount: 4,
+			duplicateCount: 1,
 			lastError: "fetch",
 		},
 		provider: {
@@ -66,8 +68,11 @@ test("validates model catalog retry diagnostics", () => {
 
 	assert.doesNotThrow(() => validateProviderAdapter(adapter));
 	adapter.catalog!.consecutiveFailures = -1;
-	assert.throws(() => validateProviderAdapter(adapter), /failure count/i);
+	assert.throws(() => validateProviderAdapter(adapter), /consecutiveFailures/);
 	adapter.catalog!.consecutiveFailures = 1;
+	adapter.catalog!.rejectedCount = -1;
+	assert.throws(() => validateProviderAdapter(adapter), /rejectedCount/);
+	adapter.catalog!.rejectedCount = 1;
 	adapter.catalog!.nextRetryAt = Number.NaN;
 	assert.throws(() => validateProviderAdapter(adapter), /nextRetryAt/);
 });
