@@ -391,13 +391,13 @@ test("distinguishes live and cached status reports with compact sections", async
 
 	await commands.status.handler("refresh", ctx);
 	assert.equal(requests, 1);
-	assert.match(notifications.at(-1)?.message ?? "", /Provider: status-presentation\nModel: model/);
+	assert.match(notifications.at(-1)?.message ?? "", /Provider: status-presentation\nModel:\s+model/);
 	assert.doesNotMatch(notifications.at(-1)?.message ?? "", /Live check scope:/);
 	assert.doesNotMatch(notifications.at(-1)?.message ?? "", /^(↻|◌|✓)/);
 	assert.doesNotMatch(notifications.at(-1)?.message ?? "", /\[(accent|dim)\]/);
 
 	await commands.status.handler("", ctx);
-	assert.match(notifications.at(-1)?.message ?? "", /Account: fresh/);
+	assert.match(notifications.at(-1)?.message ?? "", /Account\s+fresh/);
 	assert.doesNotMatch(notifications.at(-1)?.message ?? "", /^(↻|◌|✓)/);
 });
 
@@ -722,7 +722,7 @@ test("runs one minimal live check for the active provider and model on check", a
 	assert.ok(liveCheckRequests[0]?.options.signal instanceof AbortSignal);
 	assert.match(notifications.at(-1) ?? "", /^Provider: check-provider\n/);
 	assert.doesNotMatch(notifications.at(-1) ?? "", /\[(accent|dim)\]/);
-	assert.match(notifications.at(-1) ?? "", /availability verified/);
+	assert.match(notifications.at(-1) ?? "", /Availability\s+verified/);
 	assert.match(notifications.at(-1) ?? "", /Live check: success · HTTP 200 OK · \d+ms/);
 	assert.match(
 		notifications.at(-1) ?? "",
@@ -734,7 +734,7 @@ test("runs one minimal live check for the active provider and model on check", a
 	assert.equal(liveCheckRequests.length, 2);
 	assert.match(notifications.at(-1) ?? "", /^Provider: check-provider\n/);
 	assert.doesNotMatch(notifications.at(-1) ?? "", /\[(accent|dim)\]/);
-	assert.match(notifications.at(-1) ?? "", /availability verified/);
+	assert.match(notifications.at(-1) ?? "", /Availability\s+verified/);
 	assert.match(notifications.at(-1) ?? "", /Live check: success · HTTP 200 OK · \d+ms/);
 });
 
@@ -902,7 +902,7 @@ test("refreshes free preflight without running a paid live check", async () => {
 	await commands.status.handler("refresh", ctx);
 	assert.equal(preflightRequests, 1);
 	assert.equal(liveCheckRequests, 0);
-	assert.match(notifications.at(-1) ?? "", /Health: preflight passed · endpoint\/auth\/catalog/);
+	assert.match(notifications.at(-1) ?? "", /Preflight\s+passed · endpoint\/auth\/catalog/);
 });
 
 test("keeps preflight caches separate for each active model", async () => {
@@ -954,7 +954,7 @@ test("keeps preflight caches separate for each active model", async () => {
 	await commands.status.handler("refresh", ctx);
 
 	assert.equal(requests, 2);
-	assert.match(notifications.at(-1) ?? "", /Health: preflight failed · catalog/);
+	assert.match(notifications.at(-1) ?? "", /Preflight\s+failed · catalog/);
 });
 
 test("keeps the last successful live check when a later live check fails", async () => {
@@ -996,13 +996,13 @@ test("keeps the last successful live check when a later live check fails", async
 	await commands.status.handler("check", ctx);
 
 	assert.equal(attempts, 2);
-	assert.match(notifications.at(-1)?.message ?? "", /availability stale/);
+	assert.match(notifications.at(-1)?.message ?? "", /Availability\s+stale/);
 	assert.match(notifications.at(-1)?.message ?? "", /Live check: last success · HTTP 200 OK · \d+ms/);
 	assert.match(notifications.at(-1)?.message ?? "", /Live check error: upstream/);
 	assert.equal(notifications.at(-1)?.level, "warning");
 
 	await commands.status.handler("", ctx);
-	assert.match(notifications.at(-1)?.message ?? "", /availability stale/);
+	assert.match(notifications.at(-1)?.message ?? "", /Availability\s+stale/);
 	assert.equal(notifications.at(-1)?.level, "info");
 });
 
@@ -1139,7 +1139,7 @@ test("reports a live check timeout without hanging the check command", async () 
 	});
 	await Promise.race([commands.status.handler("check", ctx), deadline]);
 
-	assert.match(notifications.at(-1)?.message ?? "", /availability failed/);
+	assert.match(notifications.at(-1)?.message ?? "", /Availability\s+failed/);
 	assert.match(notifications.at(-1)?.message ?? "", /Live check error: timeout/);
 	assert.equal(notifications.at(-1)?.level, "warning");
 });
@@ -1359,7 +1359,7 @@ test("clears status presentation on an expired model restore without requesting 
 	await commands.status.handler("", ctx);
 	assert.equal(requests, 1);
 	assert.equal(notifications.length, notificationCount + 1);
-	assert.match(notifications.at(-1) ?? "", /Account: stale/);
+	assert.match(notifications.at(-1) ?? "", /Account\s+stale/);
 });
 
 test("does not warn when an active model has no auth configured", async () => {
@@ -1381,12 +1381,12 @@ test("does not warn when an active model has no auth configured", async () => {
 
 	await commands.status.handler("", ctx);
 
-	assert.match(notifications.at(-1)?.message ?? "", /Auth: missing/);
-	assert.match(notifications.at(-1)?.message ?? "", /Account: unavailable · auth missing/);
+	assert.match(notifications.at(-1)?.message ?? "", /Auth:\s+missing/);
+	assert.match(notifications.at(-1)?.message ?? "", /Account\s+unavailable · auth missing/);
 	assert.equal(notifications.at(-1)?.level, "info");
 
 	await commands.status.handler("check", ctx);
-	assert.match(notifications.at(-1)?.message ?? "", /availability skipped · auth missing/);
+	assert.match(notifications.at(-1)?.message ?? "", /Availability\s+skipped · auth missing/);
 	assert.equal(notifications.at(-1)?.level, "info");
 });
 
@@ -1461,7 +1461,7 @@ test("does not render cached status on model selection", async () => {
 
 	assert.equal(requests, 1);
 	assert.equal(notifications.length, 1);
-	assert.match(notifications.at(-1) ?? "", /Model: model/);
+	assert.match(notifications.at(-1) ?? "", /Model:\s+model/);
 	assert.doesNotMatch(notifications.at(-1) ?? "", /next-model/);
 	assert.match(notifications.at(-1) ?? "", /balance 1 credits/);
 });
@@ -1518,12 +1518,12 @@ test("keeps a stale status snapshot and recovers on a later query", async () => 
 
 	await commands.status.handler("refresh", ctx);
 	await commands.status.handler("refresh", ctx);
-	assert.match(notifications.at(-1) ?? "", /Account: stale/);
+	assert.match(notifications.at(-1) ?? "", /Account\s+stale/);
 	assert.match(notifications.at(-1) ?? "", /balance 80 credits/);
 	assert.match(notifications.at(-1) ?? "", /Error: fetch/);
 
 	await commands.status.handler("refresh", ctx);
-	assert.match(notifications.at(-1) ?? "", /Account: fresh/);
+	assert.match(notifications.at(-1) ?? "", /Account\s+fresh/);
 	assert.equal(requests, 3);
 });
 
@@ -1577,7 +1577,7 @@ test("queries Charm Hyper status on demand", async () => {
 			authorization: "Bearer test-key",
 		},
 	);
-	assert.match(notifications.at(-1) ?? "", /Account: fresh/);
+	assert.match(notifications.at(-1) ?? "", /Account\s+fresh/);
 	assert.match(notifications.at(-1) ?? "", /balance 75 credits/);
 });
 
@@ -1608,7 +1608,7 @@ test("reports effective reasoning levels from Pi's sparse model map", async () =
 	};
 
 	await commands.status.handler("", ctx);
-	assert.match(notifications.at(-1) ?? "", /Thinking levels: off, minimal, low, medium, high, xhigh, max/);
+	assert.match(notifications.at(-1) ?? "", /Thinking\s+off, minimal, low, medium, high, xhigh, max/);
 
 	ctx.model.thinkingLevelMap = {
 		off: null,
@@ -1620,7 +1620,7 @@ test("reports effective reasoning levels from Pi's sparse model map", async () =
 		max: "max",
 	};
 	await commands.status.handler("", ctx);
-	assert.match(notifications.at(-1) ?? "", /Thinking levels: low, high, max/);
+	assert.match(notifications.at(-1) ?? "", /Thinking\s+low, high, max/);
 });
 
 function base64Url(value: unknown): string {
@@ -1701,7 +1701,7 @@ test("reports the native OpenAI Codex status without registering a fake provider
 	assert.deepEqual(registrations, ["charm-hyper"]);
 	assert.match(report, /Provider: openai-codex/);
 	assert.doesNotMatch(report, /Provider: OpenAI Codex/);
-	assert.match(report, /Model: gpt-5\.5/);
+	assert.match(report, /Model:\s+gpt-5\.5/);
 	assert.doesNotMatch(report, /Model: GPT-5\.5/);
 	assert.match(report, /Plan: Pro/);
 	const primaryReset = new Date(now + 7_200_000);
@@ -1709,7 +1709,7 @@ test("reports the native OpenAI Codex status without registering a fake provider
 	const primaryResetLabel = `${primaryReset.getFullYear()}-${pad(primaryReset.getMonth() + 1)}-${pad(primaryReset.getDate())} ${pad(primaryReset.getHours())}:${pad(primaryReset.getMinutes())}`;
 	assert.ok(report.includes(`5h: 82% remaining · reset at ${primaryResetLabel}`));
 	assert.doesNotMatch(report, /reset in \d/);
-	assert.match(report, /availability not checked/);
+	assert.match(report, /Availability\s+not checked/);
 	assert.doesNotMatch(report, /Live check scope:/);
 	assert.match(report, /Weekly: 64% remaining/);
 	const usageRequest = requests.find(({ url }) => url === "https://chatgpt.com/backend-api/wham/usage");
@@ -1719,7 +1719,7 @@ test("reports the native OpenAI Codex status without registering a fake provider
 	assert.equal(usageRequest.headers.get("authorization"), `Bearer ${token}`);
 	assert.equal(usageRequest.headers.get("chatgpt-account-id"), "account-123");
 	assert.equal(usageRequest.headers.get("originator"), "pi");
-	assert.match(report, /Health: preflight passed · endpoint\/auth\/catalog/);
+	assert.match(report, /Preflight\s+passed · endpoint\/auth\/catalog/);
 });
 
 test("shows native field sources without replacing its price", async () => {
@@ -1758,11 +1758,12 @@ test("shows native field sources without replacing its price", async () => {
 	await commands.status.handler("", ctx);
 	const report = notifications.at(-1) ?? "";
 	assert.deepEqual(registrations, ["managed-provider"]);
-	assert.match(report, /Context: 128k · Pi native/);
-	assert.match(report, /Max output: 16k · Pi native/);
-	assert.match(report, /Input: text · Pi native/);
-	assert.match(report, /Thinking levels: not supported · Pi native/);
-	assert.match(report, /Pricing: \$7 input \/ \$9 output per 1M tokens · Pi native · estimate/);
+	assert.match(report, /Context\s+128k · Pi native/);
+	assert.match(report, /Max output\s+16k · Pi native/);
+	assert.match(report, /Input\s+text · Pi native/);
+	assert.match(report, /Thinking\s+not supported · Pi native/);
+	assert.match(report, /Pricing\s+input \$7 · output \$9/);
+	assert.match(report, /per 1M tokens · Pi native · estimate/);
 	assert.doesNotMatch(report, /Capability reference:/);
 	assert.doesNotMatch(report, /Pricing source:/);
 	assert.equal(ctx.model.reasoning, false);
@@ -1804,8 +1805,8 @@ test("reports native Pi catalogs and local preflight without registering a dupli
 	await commands.status.handler("", ctx);
 	const report = notifications.at(-1) ?? "";
 	assert.deepEqual(registrations, ["managed-provider"]);
-	assert.match(report, /Catalog: static · Pi native · 1 model/);
-	assert.match(report, /Health: preflight native · provider\/auth\/catalog/);
+	assert.match(report, /Catalog\s+static · Pi native · 1 model/);
+	assert.match(report, /Preflight\s+native · provider\/auth\/catalog/);
 	assert.doesNotMatch(report, /not managed by Pi Provider/);
 });
 
@@ -1929,7 +1930,7 @@ test("refreshes the model catalog on /status refresh and reflects updated models
 		providers: ["dynamic-catalog-provider"],
 	});
 	const report = notifications.at(-1) ?? "";
-	assert.match(report, /Catalog: fresh · live · 2 models/);
+	assert.match(report, /Catalog\s+fresh · live · 2 models/);
 });
 
 test("continues status reporting when modelRegistry.refresh throws an error", async () => {

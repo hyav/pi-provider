@@ -137,26 +137,66 @@ function formatRate(value: number): string {
 	return `$${value.toFixed(decimals).replace(/\.?(0+)$/, "")}`;
 }
 
-function formatPricing(model: ActiveModel, metadata?: ProviderModelMetadata): string {
+const HEADER_LABEL_WIDTH = 10;
+const CHECK_LABEL_WIDTH = 14;
+const MODEL_LABEL_WIDTH = 14;
+
+function formatHeaderRow(label: string, value: string): string {
+	return `${label.padEnd(HEADER_LABEL_WIDTH)}${value}`;
+}
+
+function formatCheckRow(label: string, value: string): string {
+	return `  ${label.padEnd(CHECK_LABEL_WIDTH)}${value}`;
+}
+
+function formatCheckDetail(value: string): string {
+	return `  ${"".padEnd(CHECK_LABEL_WIDTH)}${value}`;
+}
+
+function formatModelRow(label: string, value: string): string {
+	return `  ${label.padEnd(MODEL_LABEL_WIDTH)}${value}`;
+}
+
+function formatModelContinuation(value: string): string {
+	return formatModelRow("", value);
+}
+
+function formatCostRateLines(cost: ProviderCost): string[] {
+	const primary = [`input ${formatRate(cost.input)}`, `output ${formatRate(cost.output)}`];
+	const cache: string[] = [];
+	if (cost.cacheRead > 0) cache.push(`cache read ${formatRate(cost.cacheRead)}`);
+	if (cost.cacheWrite > 0) cache.push(`cache write ${formatRate(cost.cacheWrite)}`);
+	return [primary.join(" · "), ...(cache.length > 0 ? [cache.join(" · ")] : [])];
+}
+
+function formatPricingLines(
+	model: ActiveModel,
+	metadata: ProviderModelMetadata | undefined,
+	pricingSource: string,
+): string[] {
 	const cost = model.cost;
 	const knownFree = metadata?.pricing.known === true && cost !== undefined;
 	if (
 		!cost ||
 		(!knownFree && cost.input === 0 && cost.output === 0 && cost.cacheRead === 0 && cost.cacheWrite === 0)
 	) {
-		return "unavailable";
+		return [formatModelRow("Pricing", `unavailable${pricingSource}`)];
 	}
-	const rates = [`${formatRate(cost.input)} input`, `${formatRate(cost.output)} output`];
-	if (cost.cacheRead > 0) rates.push(`${formatRate(cost.cacheRead)} cache read`);
-	if (cost.cacheWrite > 0) rates.push(`${formatRate(cost.cacheWrite)} cache write`);
-	return `${rates.join(" / ")} per 1M tokens`;
+	const rateLines = formatCostRateLines(cost);
+	return [
+		formatModelRow("Pricing", rateLines[0] ?? "unavailable"),
+		...rateLines.slice(1).map(formatModelContinuation),
+		formatModelContinuation(`per 1M tokens${pricingSource}`),
+	];
 }
 
-function formatPricingTier(tier: NonNullable<ProviderCost["tiers"]>[number]): string {
-	const rates = [`${formatRate(tier.input)} input`, `${formatRate(tier.output)} output`];
-	if (tier.cacheRead > 0) rates.push(`${formatRate(tier.cacheRead)} cache read`);
-	if (tier.cacheWrite > 0) rates.push(`${formatRate(tier.cacheWrite)} cache write`);
-	return `above ${formatTokens(tier.inputTokensAbove)} · ${rates.join(" / ")} per 1M tokens`;
+function formatPricingTierLines(tier: NonNullable<ProviderCost["tiers"]>[number]): string[] {
+	const rateLines = formatCostRateLines(tier);
+	return [
+		formatModelRow(`Tier >${formatTokens(tier.inputTokensAbove)}`, rateLines[0] ?? "unknown"),
+		...rateLines.slice(1).map(formatModelContinuation),
+		formatModelContinuation("per 1M tokens"),
+	];
 }
 
 function formatModelFieldSource(source: ModelFieldSource | undefined): string {
@@ -207,16 +247,19 @@ function getSupportedReasoningLevels(model: ActiveModel): string[] {
 function formatThinkingLevelsLine(model: ActiveModel, metadata?: ProviderModelMetadata): string {
 	const fieldSources = metadata?.fieldSources;
 	if (model.reasoning === false) {
-		return `  Thinking levels: not supported${formatModelFieldSource(fieldSources?.reasoning)}`;
+		return formatModelRow("Thinking", `not supported${formatModelFieldSource(fieldSources?.reasoning)}`);
 	}
 	const levels = getSupportedReasoningLevels(model);
 	if (levels.length > 0) {
-		return `  Thinking levels: ${levels.join(", ")}${formatModelFieldSource(fieldSources?.thinkingLevelMap)}`;
+		return formatModelRow(
+			"Thinking",
+			`${levels.join(", ")}${formatModelFieldSource(fieldSources?.thinkingLevelMap)}`,
+		);
 	}
 	if (model.reasoning === true) {
-		return `  Thinking levels: supported${formatModelFieldSource(fieldSources?.reasoning)}`;
+		return formatModelRow("Thinking", `supported${formatModelFieldSource(fieldSources?.reasoning)}`);
 	}
-	return "  Thinking levels: unavailable";
+	return formatModelRow("Thinking", "unavailable");
 }
 
 export function resolveNativeProvider(modelRegistry: NativeProviderRegistry, providerId: string): NativeProviderLookup {
@@ -254,15 +297,15 @@ function formatCatalog(
 ): { summary: string; detailLines: string[]; issue: ReportIssue } {
 	if (!adapter) {
 		if (!nativeLookupAvailable) {
-			return { summary: "Catalog: not managed by Pi Provider", detailLines: [], issue: { level: "none" } };
+			return { summary: "not managed by Pi Provider", detailLines: [], issue: { level: "none" } };
 		}
 		if (!nativeProvider) {
-			return { summary: "Catalog: unavailable in Pi", detailLines: [], issue: { level: "none" } };
+			return { summary: "unavailable in Pi", detailLines: [], issue: { level: "none" } };
 		}
 		const count = getNativeModelCount(nativeProvider);
 		const countStr = count === undefined ? "unknown" : `${count} ${count === 1 ? "model" : "models"}`;
 		return {
-			summary: `Catalog: static · Pi native · ${countStr}`,
+			summary: `static · Pi native · ${countStr}`,
 			detailLines: [],
 			issue: { level: "none" },
 		};
@@ -274,7 +317,7 @@ function formatCatalog(
 	const freshness = catalog?.lastError ? "stale" : catalog?.updatedAt !== undefined ? "fresh" : undefined;
 	const statusParts = freshness ? [freshness, source, countStr] : [source, countStr];
 	if (catalog?.updatedAt !== undefined) statusParts.push(formatAge(now, catalog.updatedAt));
-	const summary = `Catalog: ${statusParts.join(" · ")}`;
+	const summary = statusParts.join(" · ");
 	const detailLines: string[] = [];
 	const rejectedCount = catalog?.rejectedCount ?? 0;
 	const duplicateCount = catalog?.duplicateCount ?? 0;
@@ -323,8 +366,8 @@ function scopeIssue(issue: ReportIssue, scope: string): ReportIssue {
 	return issue.level === "none" ? issue : { ...issue, key: `${scope}:${issue.key ?? issue.level}` };
 }
 
-function indentLines(lines: string[]): string[] {
-	return lines.map((line) => (line === "" ? "" : `  ${line}`));
+function stripSummaryPrefix(value: string, prefix: string): string {
+	return value.startsWith(prefix) ? value.slice(prefix.length) : value;
 }
 
 function formatStatusAmount(entry: StatusAmountEntry): string {
@@ -427,7 +470,14 @@ function formatHealth(
 	authConfigured: boolean,
 	now: number,
 	options: { liveCheckRequested?: boolean; showLiveCheckScope?: boolean } = {},
-): { summary: string; detailLines: string[]; preflightIssue: ReportIssue; liveCheckIssue: ReportIssue } {
+): {
+	preflightSummary: string;
+	availabilitySummary: string;
+	preflightDetailLines: string[];
+	availabilityDetailLines: string[];
+	preflightIssue: ReportIssue;
+	liveCheckIssue: ReportIssue;
+} {
 	let preflightSummary: string;
 	const preflightDetailLines: string[] = [];
 	let preflightIssue: ReportIssue = { level: "none" };
@@ -544,15 +594,19 @@ function formatHealth(
 		availabilitySummary = "availability not checked";
 	}
 
-	const detailLines: string[] = [];
+	const availabilityDetailLines: string[] = [];
 	if (options.showLiveCheckScope) {
-		detailLines.push("Live check scope: streamSimple() · Pi Provider tuners only (other hooks not replayed)");
+		availabilityDetailLines.push(
+			"Live check scope: streamSimple() · Pi Provider tuners only (other hooks not replayed)",
+		);
 	}
-	detailLines.push(...preflightDetailLines, ...liveCheckDetailLines);
+	availabilityDetailLines.push(...liveCheckDetailLines);
 
 	return {
-		summary: `Health: ${preflightSummary} · ${availabilitySummary}`,
-		detailLines,
+		preflightSummary,
+		availabilitySummary,
+		preflightDetailLines,
+		availabilityDetailLines,
 		preflightIssue,
 		liveCheckIssue,
 	};
@@ -594,27 +648,38 @@ export function formatProviderStatus(
 	const fieldSources = options.modelMetadata?.fieldSources;
 	const pricingSource = options.modelMetadata?.pricing ? formatPricingSource(options.modelMetadata) : "";
 	const lines = [
-		`Provider: ${model.provider}`,
-		`Model: ${model.id}`,
-		`Auth: ${auth.configured ? `configured${auth.source ? ` (${auth.source})` : ""}` : "missing"}`,
+		formatHeaderRow("Provider:", model.provider),
+		formatHeaderRow("Model:", model.id),
+		formatHeaderRow("Auth:", auth.configured ? `configured${auth.source ? ` (${auth.source})` : ""}` : "missing"),
 		"",
-		catalog.summary,
-		...indentLines(catalog.detailLines),
-		health.summary,
-		...indentLines(health.detailLines),
-		account.summary,
-		...indentLines(account.detailLines),
+		"Checks:",
+		formatCheckRow("Catalog", stripSummaryPrefix(catalog.summary, "Catalog: ")),
+		...catalog.detailLines.map(formatCheckDetail),
+		formatCheckRow("Preflight", stripSummaryPrefix(health.preflightSummary, "preflight ")),
+		...health.preflightDetailLines.map(formatCheckDetail),
+		formatCheckRow("Availability", stripSummaryPrefix(health.availabilitySummary, "availability ")),
+		...health.availabilityDetailLines.map(formatCheckDetail),
+		formatCheckRow("Account", stripSummaryPrefix(account.summary, "Account: ")),
+		...account.detailLines.map(formatCheckDetail),
 		"",
 		"Model details:",
-		`  API: ${model.api ?? provider?.provider.api ?? "managed by Pi"}`,
-		`  Endpoint: ${model.baseUrl ?? provider?.provider.baseUrl ?? "managed by Pi"}`,
-		`  Context: ${formatTokens(model.contextWindow)}${formatModelFieldSource(fieldSources?.contextWindow)}`,
-		`  Max output: ${formatTokens(model.maxTokens)}${formatModelFieldSource(fieldSources?.maxTokens)}`,
-		`  Input: ${model.input?.join(", ") || "unknown"}${formatModelFieldSource(fieldSources?.input)}`,
+		formatModelRow("API", model.api ?? provider?.provider.api ?? "managed by Pi"),
+		formatModelRow("Endpoint", model.baseUrl ?? provider?.provider.baseUrl ?? "managed by Pi"),
+		formatModelRow(
+			"Context",
+			`${formatTokens(model.contextWindow)}${formatModelFieldSource(fieldSources?.contextWindow)}`,
+		),
+		formatModelRow(
+			"Max output",
+			`${formatTokens(model.maxTokens)}${formatModelFieldSource(fieldSources?.maxTokens)}`,
+		),
+		formatModelRow("Input", `${model.input?.join(", ") || "unknown"}${formatModelFieldSource(fieldSources?.input)}`),
 		formatThinkingLevelsLine(model, options.modelMetadata),
-		`  Pricing: ${formatPricing(model, options.modelMetadata)}${pricingSource}`,
-		...(model.cost?.tiers?.map((tier) => `  Pricing tier: ${formatPricingTier(tier)}`) ?? []),
-		...(options.modelMetadata?.pricing?.note ? [`  Pricing note: ${options.modelMetadata.pricing.note}`] : []),
+		...formatPricingLines(model, options.modelMetadata, pricingSource),
+		...(model.cost?.tiers?.flatMap(formatPricingTierLines) ?? []),
+		...(options.modelMetadata?.pricing?.note
+			? [formatModelRow("Pricing note", options.modelMetadata.pricing.note)]
+			: []),
 	];
 	const issue = combineIssues(catalogIssue, preflightIssue, liveCheckIssue, statusIssue);
 	return {

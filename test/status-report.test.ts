@@ -40,9 +40,9 @@ test("does not present a discount without a base price as free", () => {
 		},
 	);
 
-	assert.match(result.report, /Pricing: unavailable/);
-	assert.doesNotMatch(result.report, /Pricing: unavailable · unavailable/);
-	assert.match(result.report, /Pricing note: discount configured, base price unavailable/);
+	assert.match(result.report, /Pricing\s+unavailable/);
+	assert.doesNotMatch(result.report, /Pricing\s+unavailable\s+unavailable/);
+	assert.match(result.report, /Pricing note\s+discount configured, base price unavailable/);
 });
 
 test("uses consistent freshness lines for catalog, preflight, and account status", () => {
@@ -77,10 +77,21 @@ test("uses consistent freshness lines for catalog, preflight, and account status
 		now,
 	);
 
-	assert.match(result.report, /Catalog: fresh · live · 1 model · 1m ago/);
-	assert.match(result.report, /Health: preflight passed · endpoint · fresh · 2m ago · availability not checked/);
-	assert.match(result.report, /Account: fresh · 3m ago/);
+	assert.match(result.report, /Catalog\s+fresh · live · 1 model · 1m ago/);
+	assert.match(result.report, /Preflight\s+passed · endpoint · fresh · 2m ago/);
+	assert.match(result.report, /Availability\s+not checked/);
+	assert.match(result.report, /Account\s+fresh · 3m ago/);
 	assert.doesNotMatch(result.report, /Updated:/);
+
+	const lines = result.report.split("\n");
+	const valueIndex = (label: string, value: string): number => {
+		const line = lines.find((candidate) => candidate.startsWith(label));
+		assert.ok(line, `missing report line: ${label}`);
+		return line.indexOf(value);
+	};
+	assert.equal(valueIndex("  Catalog", "fresh"), valueIndex("  API", "openai-completions"));
+	assert.equal(valueIndex("  Preflight", "passed"), valueIndex("  Context", "128k"));
+	assert.equal(valueIndex("  Account", "fresh"), valueIndex("  Endpoint", "https://provider.invalid/v1"));
 });
 
 test("shows model catalog retry backoff diagnostics", () => {
@@ -124,7 +135,7 @@ test("shows model catalog retry backoff diagnostics", () => {
 		now,
 	);
 
-	assert.match(result.report, /Catalog: stale · cached · 1 model · 1m ago/);
+	assert.match(result.report, /Catalog\s+stale · cached · 1 model · 1m ago/);
 	assert.match(result.report, /Skipped: 3 invalid · 1 duplicate/);
 	assert.match(result.report, /Error: fetch/);
 	assert.match(result.report, /Retry: in 30s · 2 consecutive failures/);
@@ -193,20 +204,18 @@ test("shows provenance and thinking levels without changing health severity", ()
 		},
 	);
 
-	assert.match(result.report, /Context: 128k · Pi catalog/);
-	assert.match(result.report, /Max output: 16k · Pi catalog/);
-	assert.match(result.report, /Input: text · Pi catalog/);
-	assert.match(result.report, /Thinking levels: low, high · Pi catalog/);
+	assert.match(result.report, /Context\s+128k · Pi catalog/);
+	assert.match(result.report, /Max output\s+16k · Pi catalog/);
+	assert.match(result.report, /Input\s+text · Pi catalog/);
+	assert.match(result.report, /Thinking\s+low, high · Pi catalog/);
 	assert.doesNotMatch(result.report, /Reasoning:/);
 	assert.doesNotMatch(result.report, /Quality:/);
-	assert.match(
-		result.report,
-		/Pricing: \$4 input \/ \$24 output \/ \$0.4 cache read \/ \$5 cache write per 1M tokens · Pi catalog · 20% provider discount · estimate/,
-	);
-	assert.match(
-		result.report,
-		/Pricing tier: above 272k · \$8 input \/ \$48 output \/ \$0.8 cache read \/ \$10 cache write per 1M tokens/,
-	);
+	assert.match(result.report, /Pricing\s+input \$4 · output \$24/);
+	assert.match(result.report, /cache read \$0.4 · cache write \$5/);
+	assert.match(result.report, /per 1M tokens · Pi catalog · 20% provider discount · estimate/);
+	assert.match(result.report, /Tier >272k\s+input \$8 · output \$48/);
+	assert.match(result.report, /cache read \$0.8 · cache write \$10/);
+	assert.match(result.report, /per 1M tokens/);
 	assert.doesNotMatch(result.report, /\+1 tiers/);
 	assert.doesNotMatch(result.report, /Capability reference:/);
 	assert.doesNotMatch(result.report, /Pricing source:/);

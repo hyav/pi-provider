@@ -601,8 +601,8 @@ test("Host accepts adapters before or after it, replays session_start, and defer
 		await command.handler("refresh", context);
 
 		assert.equal(pi.providerCalls.filter((id) => id === "sample-provider").length, 2);
-		assert.match(notifications.at(-1)?.message ?? "", /Account: fresh/);
-		assert.match(notifications.at(-1)?.message ?? "", /Health: preflight passed · endpoint/);
+		assert.match(notifications.at(-1)?.message ?? "", /Account\s+fresh/);
+		assert.match(notifications.at(-1)?.message ?? "", /Preflight\s+passed · endpoint/);
 		assert.equal(notifications.at(-1)?.level, "info");
 
 		const beforeRequest = pi.handlers.get("before_provider_request")?.[0];
@@ -748,19 +748,19 @@ test("Host isolates malformed envelopes and resolves duplicate IDs to the latest
 	assert.ok(pi.providers.has("status-provider"));
 	assert.ok(pi.providers.has("preflight-provider"));
 	assert.equal(pi.providers.get("conflict-provider")?.models[0]?.id, "two");
-	assert.match(notifications.at(-1) ?? "", /Account: fresh/);
+	assert.match(notifications.at(-1) ?? "", /Account\s+fresh/);
 
 	const statusProviderContext = createContext(pi, "status-provider");
 	const conflictNotifications: string[] = [];
 	statusProviderContext.ui.notify = (message) => conflictNotifications.push(message);
 	await command.handler("refresh", statusProviderContext);
-	assert.match(conflictNotifications.at(-1) ?? "", /Account: fresh/);
+	assert.match(conflictNotifications.at(-1) ?? "", /Account\s+fresh/);
 
 	const preflightContext = createContext(pi, "preflight-provider");
 	const preflightNotifications: string[] = [];
 	preflightContext.ui.notify = (message) => preflightNotifications.push(message);
 	await command.handler("refresh", preflightContext);
-	assert.match(preflightNotifications.at(-1) ?? "", /Health: preflight passed/);
+	assert.match(preflightNotifications.at(-1) ?? "", /Preflight\s+passed/);
 
 	const beforeRequest = pi.handlers.get("before_provider_request")?.[0];
 	assert.ok(beforeRequest);
@@ -905,7 +905,7 @@ test("Host can bind a Status Adapter to a native Pi provider", async () => {
 	const notifications: string[] = [];
 	context.ui.notify = (message) => notifications.push(message);
 	await pi.commands.get("status").handler("refresh", context);
-	assert.match(notifications.at(-1) ?? "", /Account: fresh/);
+	assert.match(notifications.at(-1) ?? "", /Account\s+fresh/);
 });
 
 test("tuner ordering is deterministic for equal priorities", async () => {
@@ -965,7 +965,7 @@ test("Host shutdown removes listeners and a reloaded Host starts with fresh mana
 	secondContext.ui.notify = (message) => secondNotifications.push(message);
 	await secondPi.commands.get("status").handler("", secondContext);
 	assert.equal(statusCalls.count, 1);
-	assert.match(secondNotifications.at(-1) ?? "", /Account: not supported/);
+	assert.match(secondNotifications.at(-1) ?? "", /Account\s+not supported/);
 
 	const thirdPi = new TestPi();
 	const thirdHost = createPiProviderHost({ enableOfficialPricingFallback: false });
