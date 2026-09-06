@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
@@ -13,6 +13,15 @@ const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.me
 	peerDependencies?: Record<string, string>;
 	pi?: { extensions?: string[] };
 };
+
+function capabilityEntrypoints(directory: string): string[] {
+	const root = join(packageRoot, directory);
+	if (!existsSync(root)) return [];
+	return readdirSync(root, { withFileTypes: true })
+		.filter((entry) => entry.isFile() && /\.(?:ts|js)$/.test(entry.name) && !entry.name.endsWith(".d.ts"))
+		.map((entry) => join(root, entry.name))
+		.sort();
+}
 
 test("publishes one Pi extension entrypoint for the Pi Provider package", () => {
 	assert.deepEqual(packageJson.pi?.extensions, ["./index.ts"]);
@@ -65,24 +74,28 @@ test("typechecks the optional local private overlay when it is present", () => {
 	);
 });
 
-test("all built-in preflight entrypoints expose loadable public extensions", async () => {
-	const paths = [
-		"preflight/charm-hyper.ts",
-		"preflight/deepseek.ts",
-		"preflight/google.ts",
-		"preflight/openai-codex.ts",
-		"preflight/opencode.ts",
-		"preflight/opencode-go.ts",
-	].map((path) => `${packageRoot}/${path}`);
+test("all built-in capability entrypoints expose loadable public extensions", async () => {
+	const byCapability = Object.fromEntries(
+		["providers", "preflight", "status", "tuners"].map((directory) => [directory, capabilityEntrypoints(directory)]),
+	) as Record<string, string[]>;
+	assert.deepEqual(
+		Object.fromEntries(Object.entries(byCapability).map(([directory, paths]) => [directory, paths.length])),
+		{ providers: 1, preflight: 19, status: 13, tuners: 0 },
+	);
+	const paths = Object.values(byCapability).flat();
 	const result = await discoverAndLoadExtensions(paths, packageRoot, packageRoot);
 	assert.deepEqual(result.errors, []);
 	assert.equal(result.extensions.length, paths.length);
 });
 
-test("all built-in status entrypoints expose loadable public extensions", async () => {
-	const paths = ["status/charm-hyper.ts", "status/deepseek.ts", "status/openai-codex.ts", "status/opencode-go.ts"].map(
-		(path) => `${packageRoot}/${path}`,
-	);
+test("public examples expose loadable Provider, Preflight, and Status extensions", async () => {
+	const paths = [
+		join(packageRoot, "examples/maas/providers/maas.ts"),
+		join(packageRoot, "examples/maas/preflight/maas.ts"),
+		join(packageRoot, "examples/command-code/providers/command-code.ts"),
+		join(packageRoot, "examples/command-code/preflight/command-code.ts"),
+		join(packageRoot, "examples/command-code/status/command-code.ts"),
+	];
 	const result = await discoverAndLoadExtensions(paths, packageRoot, packageRoot);
 	assert.deepEqual(result.errors, []);
 	assert.equal(result.extensions.length, paths.length);

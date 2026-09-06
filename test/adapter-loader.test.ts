@@ -552,7 +552,7 @@ test("real providers/charm-hyper.ts loaded via Jiti executes refreshModels again
 	assert.equal(model.id, "charm-hyper-sim-model");
 	assert.equal(model.contextWindow, 200_000);
 	assert.equal(model.maxTokens, 32_000);
-	assert.deepEqual(model.cost, { input: 1.5, output: 3.0, cacheRead: 0.75, cacheWrite: 0 });
+	assert.deepEqual(model.cost, { input: 1.5, output: 3.0, cacheRead: 0, cacheWrite: 0.75 });
 	assert.deepEqual(model.input, ["text", "image"]);
 	assert.equal(model.reasoning, true);
 	assert.ok(model.thinkingLevelMap);

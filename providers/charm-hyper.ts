@@ -99,7 +99,8 @@ function parseCurrentHyperModel(value: unknown): ProviderModelDraft | undefined 
 	if (typeof value.name !== "string" || value.name.trim() === "") return undefined;
 	if (!isFiniteNonNegative(value.cost_per_1m_in)) return undefined;
 	if (!isFiniteNonNegative(value.cost_per_1m_out)) return undefined;
-	if (!isFiniteNonNegative(value.cost_per_1m_in_cached)) return undefined;
+	// Cached prices are optional; the manifest documents 0/missing as no discount.
+	if (value.cost_per_1m_in_cached !== undefined && !isFiniteNonNegative(value.cost_per_1m_in_cached)) return undefined;
 	if (value.cost_per_1m_out_cached !== undefined && !isFiniteNonNegative(value.cost_per_1m_out_cached))
 		return undefined;
 	if (!isPositiveInteger(value.context_window) || !isPositiveInteger(value.default_max_tokens)) return undefined;
@@ -138,8 +139,10 @@ function parseCurrentHyperModel(value: unknown): ProviderModelDraft | undefined 
 		cost: {
 			input: value.cost_per_1m_in,
 			output: value.cost_per_1m_out,
-			cacheRead: value.cost_per_1m_in_cached,
-			cacheWrite: 0,
+			// Official Charm mapping: the cached-output price is the cache-read
+			// price and the cached-input price is the cache-write price.
+			cacheRead: value.cost_per_1m_out_cached ?? 0,
+			cacheWrite: value.cost_per_1m_in_cached ?? 0,
 		},
 		contextWindow: value.context_window,
 		maxTokens: value.default_max_tokens,

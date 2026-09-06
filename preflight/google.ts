@@ -1,5 +1,11 @@
 import type { PreflightAdapter } from "@hyav/pi-provider";
-import { definePreflightExtension, hasBaseUrlOrigin, ProviderDataError, parseRetryAfter } from "@hyav/pi-provider";
+import {
+	definePreflightExtension,
+	hasBaseUrlOrigin,
+	MAX_PROVIDER_MODEL_COUNT,
+	ProviderDataError,
+	parseRetryAfter,
+} from "@hyav/pi-provider";
 
 export const GOOGLE_MODELS_URL = "https://generativelanguage.googleapis.com/v1beta/models";
 
@@ -58,6 +64,9 @@ export const googlePreflightAdapter: PreflightAdapter = {
 		}
 		if (!isRecord(payload) || !Array.isArray(payload.models)) {
 			throw new ProviderDataError("Google preflight returned invalid catalog data", "badjson");
+		}
+		if (payload.models.length > MAX_PROVIDER_MODEL_COUNT) {
+			throw new ProviderDataError("Google preflight catalog exceeds the maximum model count", "badjson");
 		}
 		const modelIds = new Set(
 			payload.models.flatMap((value) => {

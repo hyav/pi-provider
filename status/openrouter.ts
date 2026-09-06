@@ -149,8 +149,14 @@ export const openRouterStatusAdapter: StatusAdapter = {
 				unit: "USD",
 			};
 		} catch (error) {
-			// Safe fallback: key credits, free-tier, and key-level limit still display.
-			if (!(error instanceof ProviderDataError)) throw error;
+			// /credits requires a management key, so permission-shaped failures
+			// degrade to the key payload; real failures must still surface.
+			if (
+				!(error instanceof ProviderDataError) ||
+				(error.httpStatus !== 401 && error.httpStatus !== 403 && error.httpStatus !== 404)
+			) {
+				throw error;
+			}
 		}
 
 		return {

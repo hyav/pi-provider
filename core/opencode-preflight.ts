@@ -1,3 +1,4 @@
+import { MAX_PROVIDER_MODEL_COUNT } from "../core/adapter-validation.ts";
 import { ProviderDataError } from "../core/errors.ts";
 import type { PreflightAdapter } from "../core/preflight-manager.ts";
 import { parseRetryAfter } from "../core/retry-after.ts";
@@ -25,6 +26,8 @@ export function createOpenCodeCatalogPreflightAdapter(
 		requestTimeoutMs,
 		async fetch(context) {
 			const apiKey = await context.getApiKey();
+			// OpenCode Zen catalogs are public. The check stays unauthenticated and
+			// intentionally omits the "auth" check when no credential is resolved.
 			const headers: Record<string, string> = {
 				Accept: "application/json",
 				"Accept-Encoding": "identity",
@@ -48,6 +51,9 @@ export function createOpenCodeCatalogPreflightAdapter(
 			}
 			if (!isRecord(payload) || !Array.isArray(payload.data)) {
 				throw new ProviderDataError(`${config.name} preflight returned invalid catalog data`, "badjson");
+			}
+			if (payload.data.length > MAX_PROVIDER_MODEL_COUNT) {
+				throw new ProviderDataError(`${config.name} preflight catalog exceeds the maximum model count`, "badjson");
 			}
 			const modelIds = new Set(
 				payload.data

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { ProviderDataError } from "../core/errors.ts";
 import { PreflightManager } from "../core/preflight-manager.ts";
 import { createCharmHyperPreflightAdapter } from "../preflight/charm-hyper.ts";
 import { createDeepSeekPreflightAdapter } from "../preflight/deepseek.ts";
@@ -337,6 +338,24 @@ test("new provider preflights check their authenticated catalogs", async () => {
 		checks: ["endpoint", "catalog", "auth"],
 		updatedAt: 4_000,
 	});
+
+	let unauthenticatedRequests = 0;
+	const unauthenticatedSnapshot = await openRouterAdapter.fetch({
+		fetch: async (input) => {
+			unauthenticatedRequests++;
+			assert.equal(String(input), "https://openrouter.ai/api/v1/models");
+			return new Response(JSON.stringify({ data: [{ id: "openai/gpt-5.6" }] }), { status: 200 });
+		},
+		getApiKey: async () => undefined,
+		now: () => 4_500,
+		model: { provider: "openrouter", id: "openai/gpt-5.6" } as any,
+	});
+	assert.deepEqual(unauthenticatedSnapshot, {
+		passed: false,
+		checks: ["endpoint", "catalog", "auth"],
+		updatedAt: 4_500,
+	});
+	assert.equal(unauthenticatedRequests, 1);
 });
 
 test("first-batch preflights check OpenAI-style catalogs", async () => {
@@ -611,4 +630,93 @@ test("Anthropic preflight sends Bearer token when credential type is oauth or to
 			httpStatus: 200,
 		});
 	}
+});
+
+test("xAI preflight fails closed without a usable credential", async () => {
+	const { createXaiPreflightAdapter } = await import("../preflight/xai.ts");
+	const adapter = createXaiPreflightAdapter(1_000);
+	let requests = 0;
+	const fetch = async () => {
+		requests++;
+		return new Response("unexpected");
+	};
+	for (const apiKey of [undefined, "proxy-managed"]) {
+		const snapshot = await adapter.fetch({
+			fetch,
+			getApiKey: async () => apiKey,
+			now: () => 4_000,
+			model: { provider: "xai", id: "grok-4" } as any,
+		});
+		assert.deepEqual(snapshot, { passed: false, checks: ["auth"], updatedAt: 4_000 });
+	}
+	assert.equal(requests, 0);
+});
+
+test("catalog preflights reject oversized catalog responses", async () => {
+	const { createCatalogPreflightAdapter } = await import("../core/catalog-preflight.ts");
+	const adapter = createCatalogPreflightAdapter(
+		{
+			id: "oversized-test",
+			providerId: "test-provider",
+			name: "Test",
+			modelsUrl: "https://example.test/v1/models",
+		},
+		1_000,
+	);
+	const oversized = Array.from({ length: 4_097 }, (_, index) => ({ id: `model-${index}` }));
+	await assert.rejects(
+		adapter.fetch({
+			fetch: async () => new Response(JSON.stringify({ data: oversized }), { status: 200 }),
+			getApiKey: async () => "test-key",
+			now: () => 5_000,
+			model: { provider: "test-provider", id: "model-0" } as any,
+		}),
+		(error: unknown) => error instanceof ProviderDataError && error.code === "badjson",
+	);
+});
+
+test("OpenRouter preflight fails closed without a credential despite a matching catalog", async () => {
+	const { createOpenRouterPreflightAdapter } = await import("../preflight/openrouter.ts");
+	const adapter = createOpenRouterPreflightAdapter(1_000);
+
+	for (const apiKey of [undefined, "proxy-managed"]) {
+		let requests = 0;
+		const snapshot = await adapter.fetch({
+			fetch: async (input) => {
+				requests++;
+				assert.equal(String(input), "https://openrouter.ai/api/v1/models");
+				return new Response(JSON.stringify({ data: [{ id: "openai/gpt-5.6" }] }), { status: 200 });
+			},
+			getApiKey: async () => apiKey,
+			now: () => 6_000,
+			model: { provider: "openrouter", id: "openai/gpt-5.6" } as any,
+		});
+		// The public catalog is still checked for diagnostics, but the model
+		// must never report as usable without a credential.
+		assert.equal(requests, 1);
+		assert.deepEqual(snapshot, {
+			passed: false,
+			checks: ["endpoint", "catalog", "auth"],
+			updatedAt: 6_000,
+		});
+	}
+});
+
+test("Charm Hyper preflight fails closed without a usable credential", async () => {
+	const adapter = createCharmHyperPreflightAdapter(1_000);
+	let requests = 0;
+	const fetch = async () => {
+		requests++;
+		return new Response("unexpected");
+	};
+	for (const apiKey of [undefined, "proxy-managed"]) {
+		const snapshot = await adapter.fetch({
+			fetch,
+			getApiKey: async () => apiKey,
+			now: () => 7_000,
+			model: { provider: "charm-hyper", id: "deepseek-v4-pro" } as any,
+		});
+		assert.deepEqual(snapshot, { passed: false, checks: ["auth"], updatedAt: 7_000 });
+	}
+	assert.equal(requests, 0);
 });

@@ -4,6 +4,7 @@ import {
 	authDefinesHeader,
 	definePreflightExtension,
 	getContextAuth,
+	MAX_PROVIDER_MODEL_COUNT,
 	mergeDiagnosticHeaders,
 	ProviderDataError,
 	parseRetryAfter,
@@ -56,6 +57,9 @@ export const githubCopilotPreflightAdapter: PreflightAdapter = {
 		}
 		if (!isRecord(payload) || !Array.isArray(payload.data)) {
 			throw new ProviderDataError("GitHub Copilot preflight returned invalid catalog data", "badjson");
+		}
+		if (payload.data.length > MAX_PROVIDER_MODEL_COUNT) {
+			throw new ProviderDataError("GitHub Copilot preflight catalog exceeds the maximum model count", "badjson");
 		}
 		const modelIds = new Set(
 			payload.data.flatMap((model) => {

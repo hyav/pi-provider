@@ -1,10 +1,6 @@
-import type {
-	ModelCatalogStatus,
-	ProviderAdapter,
-	ProviderModelDraft,
-	ProviderRefreshContext,
-} from "@hyav/pi-provider";
+import type { ProviderAdapter, ProviderModelDraft, ProviderRefreshContext } from "@hyav/pi-provider";
 import {
+	createModelCatalogLifecycle,
 	defineProviderExtension,
 	isLegacyNormalizedSnapshot,
 	isProviderDataError,
@@ -62,10 +58,6 @@ type CommandCodeStoredModel = ProviderModelDraft & {
 	api: ProviderModelDraft["api"];
 };
 
-function isValidTimestamp(value: unknown): value is number {
-	return typeof value === "number" && Number.isFinite(value) && value >= 0;
-}
-
 function draftsFromStoredModels(entry: CommandCodeModelsStoreEntry): ProviderModelDraft[] | undefined {
 	if (!entry || !Array.isArray(entry.models) || entry.models.length === 0) return undefined;
 	if (isLegacyNormalizedSnapshot(entry.models)) return undefined;
@@ -110,29 +102,6 @@ function storedModelsFromDrafts(models: ProviderModelDraft[]): CommandCodeStored
 			baseUrl: model.baseUrl ?? COMMAND_CODE_BASE_URL,
 		};
 	});
-}
-
-async function publishCatalog(
-	context: ProviderRefreshContext,
-	models: ProviderModelDraft[],
-	checkedAt: number,
-	update: () => void,
-): Promise<boolean> {
-	try {
-		return await context.publish({
-			persist: {
-				models: storedModelsFromDrafts(models) as unknown as NonNullable<CommandCodeModelsStoreEntry>["models"],
-				checkedAt,
-			},
-			update,
-		});
-	} catch {
-		try {
-			return await context.publish({ update });
-		} catch {
-			return false;
-		}
-	}
 }
 
 async function discoverCommandCodeModels(
@@ -198,109 +167,23 @@ export function createCommandCodeAdapter(
 	now: () => number = Date.now,
 ): ProviderAdapter {
 	syncCommandCodeEnv();
-	let models = getCommandCodeFallbackModels();
-	let lastRefreshAt: number | undefined;
-	let lastCatalogUpdatedAt: number | undefined;
-	let inFlightRefresh: { signal: AbortSignal | undefined; request: Promise<ProviderModelDraft[]> } | undefined;
-
-	const catalog: ModelCatalogStatus = {
-		source: "fallback",
-		modelCount: models.length,
-	};
 	let provider: ProviderAdapter["provider"];
-
-	const publishModels = (
-		nextModels: ProviderModelDraft[],
-		source: ModelCatalogStatus["source"],
-		updatedAt?: number,
-	) => {
-		models = nextModels;
-		provider.models = models;
-		catalog.source = source;
-		catalog.modelCount = models.length;
-		catalog.lastError = undefined;
-		if (updatedAt !== undefined) {
-			catalog.updatedAt = updatedAt;
-			lastCatalogUpdatedAt = updatedAt;
-		}
-	};
-
-	const restoreStoredModels = async (
-		context: ProviderRefreshContext,
-		entry: CommandCodeModelsStoreEntry,
-	): Promise<void> => {
-		const restoredModels = draftsFromStoredModels(entry);
-		if (!restoredModels) return;
-
-		const checkedAt = isValidTimestamp(entry?.checkedAt) ? entry.checkedAt : undefined;
-		if (lastCatalogUpdatedAt !== undefined && checkedAt !== undefined && checkedAt <= lastCatalogUpdatedAt) {
-			return;
-		}
-		if (lastCatalogUpdatedAt !== undefined && checkedAt === undefined) return;
-
-		try {
-			await context.publish({
-				update: () => {
-					publishModels(restoredModels, "live", checkedAt);
-					if (checkedAt !== undefined) lastRefreshAt = checkedAt;
-				},
-			});
-		} catch {
-			// A stale or cancelled refresh must not replace the current in-memory catalog.
-		}
-	};
-
-	const isFresh = (timestamp: number | undefined, currentTime: number): boolean =>
-		timestamp !== undefined && Math.max(0, currentTime - timestamp) <= COMMAND_CODE_MODEL_CATALOG_TTL_MS;
-
-	const refreshModels = async (context: ProviderRefreshContext): Promise<ProviderModelDraft[]> => {
-		await restoreStoredModels(context, context.stored);
-		if (context?.allowNetwork !== true || context.signal?.aborted) {
-			return [...models];
-		}
-
-		const currentTime = now();
-		if (!context.force && isFresh(lastRefreshAt, currentTime)) {
-			return [...models];
-		}
-		if (inFlightRefresh && inFlightRefresh.signal === context.signal) {
-			return inFlightRefresh.request;
-		}
-
-		const request = (async (): Promise<ProviderModelDraft[]> => {
-			try {
-				const refreshedModels = await discoverCommandCodeModels(fetchFn, discoveryTimeoutMs, context.signal);
-				if (context.signal?.aborted) {
-					throw context.signal.reason ?? new DOMException("The operation was aborted", "AbortError");
-				}
-				const updatedAt = now();
-				await publishCatalog(context, refreshedModels, updatedAt, () => {
-					publishModels(refreshedModels, "live", updatedAt);
-					lastRefreshAt = updatedAt;
-				});
-				return [...models];
-			} catch (error) {
-				if (!context.signal?.aborted && !isAbortError(error)) {
-					lastRefreshAt = now();
-					catalog.lastError = catalogErrorCode(error);
-				}
-				throw error;
-			}
-		})();
-
-		const activeRefresh = { signal: context.signal, request };
-		inFlightRefresh = activeRefresh;
-		void request.then(
-			() => {
-				if (inFlightRefresh === activeRefresh) inFlightRefresh = undefined;
-			},
-			() => {
-				if (inFlightRefresh === activeRefresh) inFlightRefresh = undefined;
-			},
-		);
-
-		return request;
-	};
+	const lifecycle = createModelCatalogLifecycle({
+		initialModels: getCommandCodeFallbackModels(),
+		initialSource: "fallback",
+		ttlMs: COMMAND_CODE_MODEL_CATALOG_TTL_MS,
+		now,
+		discover: (context) => discoverCommandCodeModels(fetchFn, discoveryTimeoutMs, context.signal),
+		restore: draftsFromStoredModels,
+		persist: (models, checkedAt) => ({
+			models: storedModelsFromDrafts(models) as unknown as NonNullable<CommandCodeModelsStoreEntry>["models"],
+			checkedAt,
+		}),
+		onUpdate: (models) => {
+			if (provider) provider.models = models;
+		},
+		errorCode: catalogErrorCode,
+	});
 
 	provider = {
 		name: COMMAND_CODE_PROVIDER_NAME,
@@ -308,14 +191,15 @@ export function createCommandCodeAdapter(
 		apiKey: COMMAND_CODE_API_KEY_VAR,
 		authHeader: true,
 		api: "openai-completions",
-		models,
-		refreshModels,
+		models: lifecycle.getModels(),
+		refreshModels: lifecycle.refreshModels,
 		headers: getCommandCodeHeaders(),
 	};
 
 	return {
 		id: COMMAND_CODE_PROVIDER_ID,
-		catalog,
+		catalog: lifecycle.catalog,
+		lifecycle,
 		provider,
 	};
 }

@@ -1,5 +1,6 @@
 /** Shared helpers for Provider-agnostic, OpenAI-style model-catalog checks. */
 
+import { MAX_PROVIDER_MODEL_COUNT } from "./adapter-validation.ts";
 import { authDefinesHeader, getContextAuth, hasBaseUrlOrigin, mergeDiagnosticHeaders } from "./diagnostic-auth.ts";
 import { ProviderDataError } from "./errors.ts";
 import type { PreflightAdapter } from "./preflight-manager.ts";
@@ -45,6 +46,12 @@ export function createCatalogPreflightAdapter(
 		async fetch(context) {
 			const auth = await getContextAuth(context);
 			const apiKey = auth.apiKey;
+			const hasResolvedAuthHeaders = Object.values(auth.headers ?? {}).some(
+				(value) => typeof value === "string" && value !== "",
+			);
+			if (config.requireAuth !== false && !isUsableApiKey(apiKey) && !hasResolvedAuthHeaders) {
+				return { passed: false, checks: ["auth"], updatedAt: context.now() };
+			}
 			const credential = context.getCredentialType
 				? await context.getCredentialType().catch(() => undefined)
 				: undefined;
@@ -53,7 +60,7 @@ export function createCatalogPreflightAdapter(
 				"Accept-Encoding": "identity",
 				...(config.headers ?? {}),
 			});
-			if (apiKey && apiKey !== "proxy-managed") {
+			if (isUsableApiKey(apiKey)) {
 				if (config.authHeaders) {
 					for (const [name, value] of Object.entries(config.authHeaders(apiKey, credential))) {
 						if (!authDefinesHeader(auth, name)) headers.set(name, value);
@@ -90,6 +97,9 @@ export function createCatalogPreflightAdapter(
 			if (!isRecord(payload) || !Array.isArray(payload.data)) {
 				throw new ProviderDataError(`${config.name} preflight returned invalid catalog data`, "badjson");
 			}
+			if (payload.data.length > MAX_PROVIDER_MODEL_COUNT) {
+				throw new ProviderDataError(`${config.name} preflight catalog exceeds the maximum model count`, "badjson");
+			}
 			const modelIds = new Set(
 				payload.data
 					.filter(isRecord)
@@ -119,6 +129,9 @@ export function collectCatalogIds(
 ): Set<string> {
 	if (!isRecord(payload) || !Array.isArray(payload.data)) {
 		throw new ProviderDataError("Catalog response returned invalid catalog data", "badjson");
+	}
+	if (payload.data.length > MAX_PROVIDER_MODEL_COUNT) {
+		throw new ProviderDataError("Catalog response exceeds the maximum model count", "badjson");
 	}
 	return new Set(
 		payload.data

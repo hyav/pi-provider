@@ -59,7 +59,7 @@ export function createVercelAIGatewayStatusAdapter(requestTimeoutMs: number): St
 			if (!response.ok) {
 				throw new ProviderDataError(
 					`Vercel AI Gateway status failed: HTTP ${response.status}`,
-					response.status === 401 ? "auth" : `http${response.status}`,
+					response.status === 401 || response.status === 403 ? "auth" : `http${response.status}`,
 					parseRetryAfter(response.headers.get("retry-after"), context.now()),
 					response.status,
 				);

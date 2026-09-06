@@ -1,5 +1,11 @@
 import type { PreflightAdapter } from "@hyav/pi-provider";
-import { definePreflightExtension, hasBaseUrlOrigin, ProviderDataError, parseRetryAfter } from "@hyav/pi-provider";
+import {
+	definePreflightExtension,
+	hasBaseUrlOrigin,
+	MAX_PROVIDER_MODEL_COUNT,
+	ProviderDataError,
+	parseRetryAfter,
+} from "@hyav/pi-provider";
 import { GROQ_MODELS_URL } from "../status/groq.ts";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -42,6 +48,9 @@ export const groqPreflightAdapter: PreflightAdapter = {
 		}
 		if (!isRecord(payload) || !Array.isArray(payload.data)) {
 			throw new ProviderDataError("Groq preflight returned invalid catalog data", "badjson");
+		}
+		if (payload.data.length > MAX_PROVIDER_MODEL_COUNT) {
+			throw new ProviderDataError("Groq preflight catalog exceeds the maximum model count", "badjson");
 		}
 		const activeIds = new Set(
 			payload.data.flatMap((model) => {

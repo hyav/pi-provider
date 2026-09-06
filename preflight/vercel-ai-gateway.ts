@@ -1,5 +1,10 @@
 import type { PreflightAdapter, PreflightSnapshot } from "@hyav/pi-provider";
-import { definePreflightExtension, ProviderDataError, parseRetryAfter } from "@hyav/pi-provider";
+import {
+	definePreflightExtension,
+	MAX_PROVIDER_MODEL_COUNT,
+	ProviderDataError,
+	parseRetryAfter,
+} from "@hyav/pi-provider";
 import { VERCEL_PROVIDER_ID } from "../status/vercel-ai-gateway/constants.ts";
 
 export const VERCEL_MODELS_URL = "https://ai-gateway.vercel.sh/v1/models";
@@ -11,6 +16,9 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 export function parseVercelModelIds(payload: unknown): Set<string> {
 	if (!isRecord(payload) || !Array.isArray(payload.data)) {
 		throw new ProviderDataError("Vercel AI Gateway preflight returned invalid catalog data", "badjson");
+	}
+	if (payload.data.length > MAX_PROVIDER_MODEL_COUNT) {
+		throw new ProviderDataError("Vercel AI Gateway preflight catalog exceeds the maximum model count", "badjson");
 	}
 
 	const modelIds = new Set<string>();
@@ -37,6 +45,8 @@ export function createVercelAIGatewayPreflightAdapter(requestTimeoutMs: number):
 		cacheTtlMs: 30_000,
 		requestTimeoutMs,
 		async fetch(context): Promise<PreflightSnapshot> {
+			// Vercel's gateway catalog is public and needs no credential; the
+			// check intentionally reports no "auth" check.
 			const response = await context.fetch(VERCEL_MODELS_URL, {
 				headers: {
 					Accept: "application/json",

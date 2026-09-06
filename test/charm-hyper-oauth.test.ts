@@ -196,3 +196,52 @@ test("honors Pi cancellation before refreshing a Charm Hyper token", async () =>
 	);
 	assert.equal(requests, 0);
 });
+
+test("derives the Charm Hyper token expiry from the ISO timestamp alone", async () => {
+	const oauth = createCharmHyperOAuth(
+		async () =>
+			new Response(
+				JSON.stringify({
+					access_token: "access-token",
+					token_type: "Bearer",
+					refresh_token: "new-refresh",
+					expiry: "2099-01-01T00:00:00.000Z",
+				}),
+				{ status: 200 },
+			),
+		() => 1_000_000,
+	);
+
+	const credentials = await oauth.refreshToken(
+		{ type: "oauth", access: "old-access", refresh: "old-refresh", expires: 1_000_000 },
+		new AbortController().signal,
+	);
+	assert.equal(credentials.access, "access-token");
+	assert.equal(credentials.refresh, "new-refresh");
+	assert.equal(credentials.expires, Date.parse("2099-01-01T00:00:00.000Z") - 30_000);
+});
+
+test("prefers expires_in when the token exchange carries several expiry forms", async () => {
+	const oauth = createCharmHyperOAuth(
+		async () =>
+			new Response(
+				JSON.stringify({
+					access_token: "access-token",
+					token_type: "Bearer",
+					refresh_token: "new-refresh",
+					expiry: "2099-01-01T00:00:00.000Z",
+					expires_in: 3_600,
+					expires_at: 9_999_999_999,
+				}),
+				{ status: 200 },
+			),
+		() => 1_000_000,
+	);
+
+	const credentials = await oauth.refreshToken(
+		{ type: "oauth", access: "old-access", refresh: "old-refresh", expires: 1_000_000 },
+		new AbortController().signal,
+	);
+	// 3_600s after now() = 1_000_000, minus the 30s expiry buffer.
+	assert.equal(credentials.expires, 1_000_000 + 3_600_000 - 30_000);
+});

@@ -364,3 +364,44 @@ test("parses Groq-style duration reset headers", async () => {
 	assert.equal(resetSecondsFromHeader(null), undefined);
 	assert.equal(resetSecondsFromHeader(""), undefined);
 });
+
+test("openrouter status degrades only permission-shaped credits failures", async () => {
+	const adapter = createOpenRouterStatusAdapter(8_000);
+
+	const degraded = await adapter.fetch(
+		statusContext("or-key", async (input: string | URL | Request) => {
+			const urlString = input.toString();
+			if (urlString === "https://openrouter.ai/api/v1/auth/key") {
+				return new Response(
+					JSON.stringify({
+						data: { label: "cli", usage: 25.5, limit: null, is_free_tier: true },
+					}),
+					{ status: 200 },
+				);
+			}
+			return new Response("forbidden", { status: 403 });
+		}),
+	);
+	assert.deepEqual(
+		degraded.entries.map(({ id }) => id),
+		["key", "credits-used", "account-tier"],
+	);
+
+	await assert.rejects(
+		adapter.fetch(
+			statusContext("or-key", async (input: string | URL | Request) => {
+				const urlString = input.toString();
+				if (urlString === "https://openrouter.ai/api/v1/auth/key") {
+					return new Response(
+						JSON.stringify({
+							data: { label: "cli", usage: 25.5, limit: null, is_free_tier: true },
+						}),
+						{ status: 200 },
+					);
+				}
+				return new Response("boom", { status: 500 });
+			}),
+		),
+		(error: unknown) => error instanceof ProviderDataError && error.httpStatus === 500,
+	);
+});

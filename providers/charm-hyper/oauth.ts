@@ -156,21 +156,20 @@ function parseDevicePollResponse(payload: unknown): DevicePollResult {
 }
 
 function parseTokenExchangeResponse(payload: unknown): TokenExchangeResponse {
+	const allowedKeys = ["access_token", "token_type", "refresh_token", "expiry", "expires_in", "expires_at"] as const;
 	if (
 		!isRecord(payload) ||
+		!hasOnlyKeys(payload, allowedKeys) ||
 		!nonEmptyString(payload.access_token) ||
 		!nonEmptyString(payload.token_type) ||
 		!nonEmptyString(payload.refresh_token) ||
-		!nonEmptyString(payload.expiry)
+		typeof payload.expiry !== "string"
 	) {
 		throw new Error("Charm Hyper token exchange response is invalid");
 	}
 	if (Object.hasOwn(payload, "expires_in")) {
-		if (
-			!hasOnlyKeys(payload, ["access_token", "token_type", "refresh_token", "expiry", "expires_in"]) ||
-			!positiveInteger(payload.expires_in) ||
-			Object.hasOwn(payload, "expires_at")
-		) {
+		// expires_in is authoritative when other absolute forms are also present.
+		if (!positiveInteger(payload.expires_in)) {
 			throw new Error("Charm Hyper token exchange response has an invalid expiry");
 		}
 		return {
@@ -180,10 +179,7 @@ function parseTokenExchangeResponse(payload: unknown): TokenExchangeResponse {
 		};
 	}
 	if (Object.hasOwn(payload, "expires_at")) {
-		if (
-			!hasOnlyKeys(payload, ["access_token", "token_type", "refresh_token", "expiry", "expires_at"]) ||
-			!positiveInteger(payload.expires_at)
-		) {
+		if (!positiveInteger(payload.expires_at)) {
 			throw new Error("Charm Hyper token exchange response has an invalid expiry");
 		}
 		return {
@@ -192,7 +188,17 @@ function parseTokenExchangeResponse(payload: unknown): TokenExchangeResponse {
 			expiresAtSeconds: payload.expires_at,
 		};
 	}
-	throw new Error("Charm Hyper token exchange response has an invalid expiry");
+	// Some responses only carry the ISO `expiry` timestamp; derive the
+	// absolute expiry from it when no numeric form is present.
+	const expiryMs = typeof payload.expiry === "string" ? Date.parse(payload.expiry) : NaN;
+	if (!Number.isFinite(expiryMs)) {
+		throw new Error("Charm Hyper token exchange response has an invalid expiry");
+	}
+	return {
+		accessToken: payload.access_token,
+		refreshToken: payload.refresh_token,
+		expiresAtSeconds: Math.floor(expiryMs / 1_000),
+	};
 }
 
 async function initiateDeviceAuth(

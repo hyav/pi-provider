@@ -1,5 +1,11 @@
 import type { PreflightAdapter } from "@hyav/pi-provider";
-import { definePreflightExtension, hasBaseUrlOrigin, ProviderDataError, parseRetryAfter } from "@hyav/pi-provider";
+import {
+	definePreflightExtension,
+	hasBaseUrlOrigin,
+	MAX_PROVIDER_MODEL_COUNT,
+	ProviderDataError,
+	parseRetryAfter,
+} from "@hyav/pi-provider";
 
 export const DEEPSEEK_MODELS_URL = "https://api.deepseek.com/models";
 
@@ -43,6 +49,9 @@ export const deepSeekPreflightAdapter: PreflightAdapter = {
 		}
 		if (!isRecord(payload) || !Array.isArray(payload.data)) {
 			throw new ProviderDataError("DeepSeek preflight returned invalid catalog data", "badjson");
+		}
+		if (payload.data.length > MAX_PROVIDER_MODEL_COUNT) {
+			throw new ProviderDataError("DeepSeek preflight catalog exceeds the maximum model count", "badjson");
 		}
 		const modelIds = new Set(
 			payload.data

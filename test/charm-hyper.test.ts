@@ -137,7 +137,7 @@ test("parses the current Hyper /provider catalog schema", () => {
 	});
 	assert.deepEqual(model.headers, { "User-Agent": HYPER_USER_AGENT });
 	assert.deepEqual(model.input, ["text", "image"]);
-	assert.deepEqual(model.cost, { input: 0.95, output: 4, cacheRead: 0.16, cacheWrite: 0 });
+	assert.deepEqual(model.cost, { input: 0.95, output: 4, cacheRead: 0.8, cacheWrite: 0.16 });
 	assert.equal(model.contextWindow, 262_144);
 	assert.equal(model.maxTokens, 32_768);
 });
@@ -848,7 +848,7 @@ test("Provider explicit endpoint fields take precedence over Pi catalog", async 
 	assert.equal(model.name, "Provider Explicit Sonnet");
 	assert.equal(model.contextWindow, 300_000);
 	assert.equal(model.maxTokens, 40_000);
-	assert.deepEqual(model.cost, { input: 5.0, output: 25.0, cacheRead: 1.0, cacheWrite: 0 });
+	assert.deepEqual(model.cost, { input: 5.0, output: 25.0, cacheRead: 0, cacheWrite: 1.0 });
 	assert.deepEqual(model.input, ["text", "image"]);
 	assert.equal(model.reasoning, true);
 });

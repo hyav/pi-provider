@@ -31,10 +31,11 @@ export function parseHuggingFaceAccount(payload: unknown): HuggingFaceAccount {
 	}
 	// Response envelope: { type, id, name, emailVerified, canPay, isPro, plan, periodEnd, credits, ... }
 	const plan = safeText(payload.plan);
+	const credits = finiteNumber(payload.credits);
 	// Older token generations omit the envelope fields entirely.
 	return {
 		...(plan !== undefined ? { plan } : {}),
-		...(finiteNumber(payload.credits) !== undefined ? { credits: finiteNumber(payload.credits) } : {}),
+		...(credits !== undefined ? { credits } : {}),
 	};
 }
 

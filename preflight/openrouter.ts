@@ -1,5 +1,11 @@
 import type { PreflightAdapter } from "@hyav/pi-provider";
-import { definePreflightExtension, hasBaseUrlOrigin, ProviderDataError, parseRetryAfter } from "@hyav/pi-provider";
+import {
+	definePreflightExtension,
+	hasBaseUrlOrigin,
+	MAX_PROVIDER_MODEL_COUNT,
+	ProviderDataError,
+	parseRetryAfter,
+} from "@hyav/pi-provider";
 import { OPENROUTER_KEY_URL } from "../status/openrouter.ts";
 
 export const OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models";
@@ -33,6 +39,9 @@ async function collectModelIds(context: Parameters<PreflightAdapter["fetch"]>[0]
 	}
 	if (!isRecord(payload) || !Array.isArray(payload.data)) {
 		throw new ProviderDataError("OpenRouter preflight returned invalid catalog data", "badjson");
+	}
+	if (payload.data.length > MAX_PROVIDER_MODEL_COUNT) {
+		throw new ProviderDataError("OpenRouter preflight catalog exceeds the maximum model count", "badjson");
 	}
 	return new Set(
 		payload.data
@@ -85,7 +94,7 @@ export const openRouterPreflightAdapter: PreflightAdapter = {
 		const apiKey = await context.getApiKey();
 		const checks: string[] = ["endpoint", "catalog"];
 		if (!apiKey || apiKey === "proxy-managed") {
-			return { passed: modelIds.has(context.model.id), checks: [...checks, "auth"], updatedAt: context.now() };
+			return { passed: false, checks: [...checks, "auth"], updatedAt: context.now() };
 		}
 		// Management keys use /api/v1/credits as the only key endpoint and get 404 here.
 		const authStatus = await checkCredential(context, apiKey);

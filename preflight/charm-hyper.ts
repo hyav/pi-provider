@@ -13,9 +13,13 @@ export function createCharmHyperPreflightAdapter(requestTimeoutMs: number): Pref
 		supportsModel: (model) => hasBaseUrlOrigin(model.baseUrl, HYPER_PROVIDER_URL),
 		async fetch(context) {
 			const apiKey = await context.getApiKey();
-			if (!apiKey) return { passed: false, checks: ["auth"], updatedAt: context.now() };
+			// "proxy-managed" is not a usable credential for the official endpoints,
+			// so it fails closed together with a missing key.
+			if (!apiKey || apiKey === "proxy-managed") {
+				return { passed: false, checks: ["auth"], updatedAt: context.now() };
+			}
 			const headers = new Headers(hyperJsonHeaders());
-			if (apiKey !== "proxy-managed") headers.set("Authorization", `Bearer ${apiKey}`);
+			headers.set("Authorization", `Bearer ${apiKey}`);
 			let endpoint = HYPER_PROVIDER_URL;
 			let response = await context.fetch(endpoint, { headers, signal: context.signal });
 			if (response.status === 404) {
