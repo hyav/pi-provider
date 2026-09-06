@@ -1,5 +1,5 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import type { OfficialModelMeta } from "./official-pricing.ts";
+import type { PiCatalogSnapshot } from "./pi-model-metadata.ts";
 import type { PreflightAdapter } from "./preflight-manager.ts";
 import type { PiProviderDependencies } from "./runtime-config.ts";
 import type { ProviderAdapter, ProviderModelDraft, StatusAdapter, TunerAdapter } from "./types.ts";
@@ -74,7 +74,9 @@ export type AdapterRegistrationEnvelope =
 
 export interface StartupBridge {
 	dependencies: PiProviderDependencies;
-	officialPricing: Promise<Record<string, OfficialModelMeta>>;
+	piCatalog?: Promise<PiCatalogSnapshot>;
+	/** @deprecated Generic official pricing has been removed. */
+	officialPricing?: Promise<Record<string, unknown>>;
 }
 
 export interface StartupBridgeRequest {

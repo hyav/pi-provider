@@ -93,7 +93,14 @@ function createAdapterExtension<TAdapter extends ProviderAdapter | StatusAdapter
 			// Host runs in a different Pi module context and cannot use this
 			// extension's module-local state. The factory is retained so a Host
 			// loaded later can recreate the adapter with its configured runtime.
-			const registeredProvider = registerProviderAdapter(pi, providerAdapter, bridge.dependencies, {}, modelDrafts);
+			const piCatalog = await bridge.piCatalog;
+			const registeredProvider = registerProviderAdapter(
+				pi,
+				providerAdapter,
+				bridge.dependencies,
+				piCatalog,
+				modelDrafts,
+			);
 			emitRegistration(
 				pi,
 				{
@@ -110,7 +117,7 @@ function createAdapterExtension<TAdapter extends ProviderAdapter | StatusAdapter
 				// repeat OAuth-only replacement after binding so /reload clears a
 				// raw environment key retained by Pi's merge semantics.
 				registeredProvider.apiKey === undefined
-					? () => registerProviderAdapter(pi, providerAdapter, bridge.dependencies, {}, modelDrafts)
+					? () => registerProviderAdapter(pi, providerAdapter, bridge.dependencies, piCatalog, modelDrafts)
 					: undefined,
 			);
 			return;

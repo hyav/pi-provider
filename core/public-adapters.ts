@@ -18,7 +18,7 @@ export {
 	defineStatusExtension,
 	defineTunerExtension,
 } from "./adapter-extensions.ts";
-export { MAX_PROVIDER_MODEL_COUNT } from "./adapter-validation.ts";
+export { MAX_PROVIDER_MODEL_COUNT, validateProviderModelDrafts } from "./adapter-validation.ts";
 export { createCatalogPreflightAdapter } from "./catalog-preflight.ts";
 export { withDeadline } from "./deadline.ts";
 export {
@@ -37,6 +37,7 @@ export type {
 } from "./model-catalog.ts";
 export { createModelCatalogLifecycle } from "./model-catalog.ts";
 export { createOpenCodeCatalogPreflightAdapter } from "./opencode-preflight.ts";
+export { isLegacyNormalizedModel, isLegacyNormalizedSnapshot } from "./pi-model-metadata.ts";
 export type {
 	PreflightAdapter,
 	PreflightContextLike,
@@ -48,10 +49,15 @@ export { parseRetryAfter } from "./retry-after.ts";
 export type { StatusContextLike } from "./status-manager.ts";
 export type {
 	ActiveModel,
+	ModelCatalogSource,
 	ModelCatalogStatus,
 	ProviderAdapter,
+	ProviderCost,
 	ProviderModel,
 	ProviderModelDraft,
+	ProviderPricingAdjustment,
+	ProviderPricingPolicy,
+	ProviderPricingSource,
 	ProviderRefreshContext,
 	ProviderRequestAuth,
 	StatusAdapter,
@@ -59,5 +65,7 @@ export type {
 	StatusEntry,
 	StatusSnapshot,
 	StoredCredentialLike,
+	ThinkingLevel,
+	TunerAdapter,
 	TunerContext,
 } from "./types.ts";

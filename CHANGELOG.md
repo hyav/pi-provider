@@ -2,6 +2,15 @@
 
 This file is the authoritative user-facing release history for `@hyav/pi-provider`.
 
+## 0.2.0 - 2026-09-06
+
+- Add Pi catalog fallback based on `@earendil-works/pi-ai` built-in models, scoped to original manufacturer providers (`anthropic`, `openai`, `google`, `deepseek`, `mistral`, `xai`, `minimax`, `minimax-cn`, `moonshotai`, `moonshotai-cn`, `kimi-coding`, `zai`, `zai-coding-cn`, `xiaomi`, and `ant-ling`), strictly excluding OpenRouter, third-party proxies, aggregators, and token plans.
+- Supplement registered provider models with missing fields (`cost`, `contextWindow`, `maxTokens`, `input` modalities, `reasoning`, `thinkingLevelMap`, and `compat`) using deterministic matching and field-level provenance (`provider`, `pi`, `mixed`, `default`, `normalized`); support disabling fallback per adapter via `usePiModelMetaFallback: false`.
+- Establish dynamic provider adapter persistence contract: dynamic adapters must persist raw model drafts instead of normalized default models to prevent defaulted capabilities from suppressing manufacturer metadata in the Pi catalog fallback; detect and invalidate legacy normalized snapshots.
+- Refactor `/status` reporting: compress `Catalog:`, `Health:`, and `Account:` to compact single lines, merge `Reasoning:` and `Thinking levels:` into a single line, and display field-level provenance.
+- Remove OpenRouter generic model metadata, pricing completion, and cache mechanisms (`openrouter-model-metadata.json`, `fetchOfficialModelMetadata()`, `fetchOfficialPricing()`, `applyOfficialModelMetadata()`, `applyOfficialModelCosts()`, `parseOpenRouterModels()`, `parseOpenRouterPricing()`, `findOfficialMeta()`, `findOfficialCost()`, `getDefaultOpenRouterMetadataCachePath()`, and `OPENROUTER_MODELS_URL`); OpenRouter as a native Pi provider with its own status/preflight adapters remains fully supported.
+- Remove benchmark quality runtime, adapters, caching, and diagnostics (`QualityManager`, Artificial Analysis, LiveBench, Agent Arena, `/status quality`, `ARTIFICIAL_ANALYSIS_API_KEY`, and quality cache directories).
+
 ## 0.1.8 - 2026-09-01
 
 - Make Charm Hyper model catalogs online-only: use the last successful online snapshot when refresh is unavailable and an empty catalog when no snapshot exists; remove package-maintained static model, pricing, and model-specific capability fallbacks.

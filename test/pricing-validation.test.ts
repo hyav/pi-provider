@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { join } from "node:path";
 import test from "node:test";
 import { validateProviderAdapter } from "../core/adapter-validation.ts";
 import { normalizeProviderModels } from "../core/provider-registration.ts";
@@ -94,21 +93,4 @@ test("rejects an invalid runtime pricing policy", () => {
 			}),
 		/multiplier/,
 	);
-});
-
-test("derives the metadata cache path after applying an agentDir override", () => {
-	const custom = resolvePiProviderDependencies({ agentDir: "/custom/pi-agent" });
-	assert.equal(
-		custom.openRouterMetadataCachePath,
-		join("/custom/pi-agent", "extensions", "pi-provider", "openrouter-model-metadata.json"),
-	);
-
-	const memoryOnly = resolvePiProviderDependencies({ agentDir: "" });
-	assert.equal(memoryOnly.openRouterMetadataCachePath, "");
-
-	const explicit = resolvePiProviderDependencies({
-		agentDir: "/custom/pi-agent",
-		openRouterMetadataCachePath: "/explicit/cache.json",
-	});
-	assert.equal(explicit.openRouterMetadataCachePath, "/explicit/cache.json");
 });

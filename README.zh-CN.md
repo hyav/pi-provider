@@ -11,7 +11,7 @@
 - 由一个 Pi Provider Host 统一负责注册、Status、Preflight、实时检查和请求 Tuner
 - 由单一 Pi 入口在 `/reload` 时发现 Provider、Status、Preflight 和 Tuner Adapter 文件
 - 通过缓存在线快照、有界后台刷新和失败保留提供可靠的模型目录
-- 优先采用 Provider 价格元数据，并可由 OpenRouter 补全价格和质量指标
+- 优先采用 Provider 元数据，并由 Pi 原厂模型目录补全价格与能力，具备确定性的字段级来源诊断
 - 显式诊断：缓存 `/status`、免费 `/status refresh` 和可能计费的 `/status check`
 - 内置 Charm Hyper、DeepSeek、Google Gemini、OpenAI Codex、OpenCode Zen 和 OpenCode Go 集成
 - Status/Preflight 适配覆盖 Pi 原生 Provider：Anthropic、GitHub Copilot、OpenRouter、Groq、xAI
@@ -53,9 +53,9 @@ pi install npm:@hyav/pi-provider
 |---|---:|---|---|
 | `HYPER_API_KEY` | Charm Hyper API Key 鉴权需要 | 无 | 为内置 `charm-hyper` Provider 提供凭据；OAuth 用户可以使用 `/login` |
 | `ANTHROPIC_USAGE_URL` | 否 | `https://claude.ai/api/usage` | 自定义 Anthropic 用量端点；默认端点仅支持订阅 OAuth |
-| `PI_CODING_AGENT_DIR` | 否 | `~/.pi/agent` | 修改 Pi agent 目录；公开 OpenRouter 元数据缓存在 `<agent-dir>/extensions/pi-provider/` 下 |
+| `PI_CODING_AGENT_DIR` | 否 | `~/.pi/agent` | 修改 Pi agent 目录 |
 
-程序化集成可以通过 `createPiProviderRuntime()` 或 `createPiProviderHost()` 配置价格回退、价格策略、请求超时、元数据 URL 和缓存路径。程序化默认值会从 `PI_CODING_AGENT_DIR`（回退到 `~/.pi/agent`）解析 agent 目录，并保持 OpenRouter 元数据缓存落盘到 `<agent-dir>/extensions/pi-provider/`，与上表一致；Pi 入口会用 Pi 自身的解析覆盖它。使用自定义 capability 根目录的 Host 包可以调用 `createPiProviderExtension({ adapterRoot, dependencies })`。源码定义 [`PiProviderDependencies`](core/runtime-config.ts) 是权威依据。
+程序化集成可以通过 `createPiProviderRuntime()` 或 `createPiProviderHost()` 配置价格策略、请求超时和 Provider 选项。程序化默认值会从 `PI_CODING_AGENT_DIR`（回退到 `~/.pi/agent`）解析 agent 目录；Pi 入口会用 Pi 自身的解析覆盖它。使用自定义 capability 根目录的 Host 包可以调用 `createPiProviderExtension({ adapterRoot, dependencies })`。源码定义 [`PiProviderDependencies`](core/runtime-config.ts) 是权威依据。
 
 ## Adapter 发现（文件级即插即用）
 
@@ -82,7 +82,7 @@ Adapter 文件不得运行时导入 Pi 的内置包（`@earendil-works/pi-coding
 
 ## 使用须知
 
-`/status` 离线运行，`/status refresh` 执行免费远程检查，`/status check` 会发送可能消耗配额的真实模型请求。配置的凭据只会发送给对应 Provider 端点，并且不会出现在 Status 输出中。
+`/status` 离线运行，`/status refresh` 执行免费远程检查并更新目录缓存，`/status check` 会发送可能消耗配额的真实模型请求。配置的凭据只会发送给对应 Provider 端点，并且不会出现在 Status 输出中。
 
 ## 许可证
 

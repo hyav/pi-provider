@@ -17,9 +17,8 @@ import {
 	type PiProviderRuntimeController,
 	prepareProviderRegistration,
 } from "./extension.ts";
-import { fetchOfficialModelMetadata, type OfficialModelMeta, OPENROUTER_MODELS_URL } from "./official-pricing.ts";
+import { createEmptyCatalogSnapshot, loadPiCatalog, type PiCatalogSnapshot } from "./pi-model-metadata.ts";
 import type { PreflightAdapter } from "./preflight-manager.ts";
-import { refreshProviderRegistrations } from "./provider-registration.ts";
 import { scheduleModelCatalogRefresh } from "./runtime.ts";
 import type { PiProviderDependencies } from "./runtime-config.ts";
 import { resolvePiProviderDependencies } from "./runtime-config.ts";
@@ -66,52 +65,16 @@ export function createPiProviderHost(dependencies: Partial<PiProviderDependencie
 		let readyPromise: Promise<PiProviderRuntimeController | undefined> | undefined;
 		let disposed = false;
 		let lifecycleGeneration = 0;
-		let pricingRefreshController: AbortController | undefined;
-		let latestBackgroundPricing: Record<string, OfficialModelMeta> | undefined;
-		let installedDefinition:
-			| {
-					generation: number;
-					definition: PiProviderDefinition;
-					providerDrafts: Map<ProviderAdapter, ProviderModelDraft[]>;
-			  }
-			| undefined;
 
-		const onBackgroundRefresh = (snapshot: Record<string, OfficialModelMeta>): void => {
-			latestBackgroundPricing = snapshot;
-			if (disposed || installedDefinition === undefined || installedDefinition.generation !== lifecycleGeneration)
-				return;
-			active?.updateOfficialPricing?.(snapshot);
-			// Re-register from the adapter's current registration state. A dynamic
-			// refreshModels() may have replaced the startup drafts since assembly.
-			refreshProviderRegistrations(pi, installedDefinition.definition.providers, runtime, snapshot);
-		};
-		const officialPricing = runtime.enableOfficialPricingFallback
-			? fetchOfficialModelMetadataForHost(runtime, { allowNetwork: false })
-			: Promise.resolve({});
-		const bridge: StartupBridge = { dependencies: runtime, officialPricing };
-
-		const startOfficialPricingRefresh = (): void => {
-			pricingRefreshController?.abort();
-			pricingRefreshController = undefined;
-			if (!runtime.enableOfficialPricingFallback || disposed) {
-				return;
-			}
-			const controller = new AbortController();
-			pricingRefreshController = controller;
-			void fetchOfficialModelMetadataForHost(runtime, { signal: controller.signal })
-				.then((snapshot) => {
-					if (controller.signal.aborted || disposed) return;
-					onBackgroundRefresh(snapshot);
-				})
-				.catch(() => undefined)
-				.finally(() => {
-					if (pricingRefreshController === controller) pricingRefreshController = undefined;
-				});
+		const piCatalogPromise = loadPiCatalog({ fetch: runtime.fetch }).catch(() => createEmptyCatalogSnapshot());
+		const bridge: StartupBridge = {
+			dependencies: runtime,
+			piCatalog: piCatalogPromise,
+			officialPricing: Promise.resolve({}),
 		};
 
 		const invalidateRuntime = (): void => {
 			lifecycleGeneration++;
-			installedDefinition = undefined;
 			active?.shutdown();
 			active = undefined;
 			readyPromise = undefined;
@@ -196,7 +159,7 @@ export function createPiProviderHost(dependencies: Partial<PiProviderDependencie
 		): Promise<{
 			definition: PiProviderDefinition;
 			providerDrafts: Map<ProviderAdapter, ProviderModelDraft[]>;
-			pricing: Record<string, OfficialModelMeta>;
+			piCatalog: PiCatalogSnapshot;
 		}> => {
 			const envelopes = [...registrations.values()];
 			const providerEnvelopes = groupedWithoutConflicts(
@@ -207,7 +170,10 @@ export function createPiProviderHost(dependencies: Partial<PiProviderDependencie
 				(entry) => entry.id,
 				"provider",
 			);
-			const pricingPromise = officialPricing.catch(() => ({}));
+			const piCatalogPromise = loadPiCatalog({
+				modelRegistry: ctx?.modelRegistry,
+				fetch: runtime.fetch,
+			}).catch(() => createEmptyCatalogSnapshot());
 			const providerResultsPromise = Promise.all(
 				providerEnvelopes.map(async (entry) => {
 					try {
@@ -220,7 +186,7 @@ export function createPiProviderHost(dependencies: Partial<PiProviderDependencie
 					}
 				}),
 			);
-			const [pricing, providerResults] = await Promise.all([pricingPromise, providerResultsPromise]);
+			const [piCatalog, providerResults] = await Promise.all([piCatalogPromise, providerResultsPromise]);
 			const providers: ProviderAdapter[] = [];
 			const providerDrafts = new Map<ProviderAdapter, ProviderModelDraft[]>();
 			for (const result of providerResults) {
@@ -236,7 +202,16 @@ export function createPiProviderHost(dependencies: Partial<PiProviderDependencie
 				try {
 					const modelDrafts =
 						result.entry.adapter.registration?.modelDrafts ?? result.entry.modelDrafts ?? adapter.provider.models;
-					prepareProviderRegistration(adapter, runtime, pricing, modelDrafts);
+					const lifecycle = adapter.lifecycle ?? (adapter.provider.refreshModels as any)?.lifecycle;
+					if (lifecycle && modelDrafts && modelDrafts.length > 0) {
+						lifecycle.setModels(
+							modelDrafts,
+							result.entry.adapter.catalog?.source,
+							result.entry.adapter.catalog?.updatedAt,
+						);
+					}
+					prepareProviderRegistration(adapter, runtime, piCatalog, modelDrafts);
+					result.entry.adapter = adapter;
 					providerDrafts.set(adapter, modelDrafts);
 					providers.push(adapter);
 				} catch (error) {
@@ -380,7 +355,7 @@ export function createPiProviderHost(dependencies: Partial<PiProviderDependencie
 				tuners: tuners.sort(compareAdapterIds),
 			};
 			validatePiProviderDefinition(definition);
-			return { definition, providerDrafts, pricing };
+			return { definition, providerDrafts, piCatalog };
 		};
 
 		const ensureReady = (ctx?: ExtensionContext): Promise<PiProviderRuntimeController | undefined> => {
@@ -389,7 +364,7 @@ export function createPiProviderHost(dependencies: Partial<PiProviderDependencie
 			const generation = lifecycleGeneration;
 			const pending = (async (): Promise<PiProviderRuntimeController | undefined> => {
 				if (disposed || generation !== lifecycleGeneration) return undefined;
-				const { definition, providerDrafts, pricing } = await buildDefinition(ctx);
+				const { definition, providerDrafts, piCatalog } = await buildDefinition(ctx);
 				if (disposed || generation !== lifecycleGeneration) return undefined;
 				const providerIds = new Set(
 					[...registrations.values()]
@@ -403,7 +378,7 @@ export function createPiProviderHost(dependencies: Partial<PiProviderDependencie
 					for (const providerId of providerIds) pi.unregisterProvider(providerId);
 				}
 				if (disposed || generation !== lifecycleGeneration) return undefined;
-				const controller = installPiProviderRuntime(pi, runtime, definition, pricing, {
+				const controller = installPiProviderRuntime(pi, runtime, definition, piCatalog, {
 					registerHandlers: false,
 					providerDrafts,
 				});
@@ -412,8 +387,6 @@ export function createPiProviderHost(dependencies: Partial<PiProviderDependencie
 					return undefined;
 				}
 				active = controller;
-				installedDefinition = { generation, definition, providerDrafts };
-				if (latestBackgroundPricing !== undefined) onBackgroundRefresh(latestBackgroundPricing);
 				return controller;
 			})();
 			readyPromise = pending.catch((error) => {
@@ -432,7 +405,6 @@ export function createPiProviderHost(dependencies: Partial<PiProviderDependencie
 		});
 		pi.on("session_start", (event, ctx) => {
 			invalidateRuntime();
-			startOfficialPricingRefresh();
 			scheduleModelCatalogRefresh(ctx, event.reason);
 		});
 		pi.on("before_provider_request", async (event, ctx) => {
@@ -447,8 +419,6 @@ export function createPiProviderHost(dependencies: Partial<PiProviderDependencie
 		});
 		pi.on("session_shutdown", () => {
 			disposed = true;
-			pricingRefreshController?.abort();
-			pricingRefreshController = undefined;
 			invalidateRuntime();
 			unsubscribeHostClaim();
 			unsubscribeBridge();
@@ -463,23 +433,4 @@ export function createPiProviderHost(dependencies: Partial<PiProviderDependencie
 			},
 		});
 	};
-}
-
-function fetchOfficialModelMetadataForHost(
-	runtime: PiProviderDependencies,
-	options: { allowNetwork?: boolean; signal?: AbortSignal } = {},
-) {
-	return fetchOfficialModelMetadata(
-		runtime.fetch,
-		runtime.officialPricingUrl,
-		runtime.officialPricingTimeoutMs,
-		runtime.officialPricingCacheTtlMs,
-		runtime.officialPricingMaxStaleMs,
-		runtime.now,
-		{
-			cachePath:
-				runtime.officialPricingUrl === OPENROUTER_MODELS_URL ? runtime.openRouterMetadataCachePath : undefined,
-			...options,
-		},
-	);
 }

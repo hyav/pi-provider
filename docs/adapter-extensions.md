@@ -91,7 +91,43 @@ export default defineProviderExtension({
 
 Dynamic Provider adapters may use the public `createModelCatalogLifecycle()` helper for snapshot restoration, TTL checks, generation-guarded publication, persistence fallback, complete live replacement, and retention of the last successful catalog after errors. The adapter remains responsible for endpoint authentication, response parsing and validation, stored-model conversion, error-code mapping, and assigning `onUpdate` models to its Provider definition. `initialModels` represents an explicit static fallback; omit it to start with `source: "empty"`. A restored snapshot is reported as `"cached"`, while a successful network publication is `"live"`. All concurrent callers share at most one Provider-level discovery request even when they have different signals. Cancelling one caller stops only that caller's wait; it does not cancel the bounded shared request or other callers. Generation-guarded publication attempts are serialized so a newer valid caller can publish when an older caller is rejected. Successful-catalog TTL and failure retry timing are independent: failures use exponential backoff from 30 seconds up to 15 minutes by default, configurable with `failureBackoffMs` and `maxFailureBackoffMs`, while `force` bypasses both TTL and retry backoff. Catalog diagnostics expose the last successful refresh, last attempt, consecutive failure count, and next retry time. A discovery function may return either a model array or `{ models, diagnostics }`; diagnostics support only non-negative safe-integer `rejectedCount` and `duplicateCount` values. These counts are published only with an accepted catalog and never contain rejected IDs, payload fragments, or response bodies.
 
-OpenRouter completion is exposed as model metadata through `fetchOfficialModelMetadata()` and `applyOfficialModelMetadata()`. It may fill missing pricing, capabilities, identity, and quality fields for models already supplied by the Provider; it never creates Provider models. The older `fetchOfficialPricing()` and `applyOfficialModelCosts()` names remain deprecated compatibility wrappers with the same parameters, cache file, and results. Registered model diagnostics record field-level provenance for cost, context window, maximum output, input modes, reasoning support, and the thinking-level map. `fieldSources` uses `"normalized"` when a supplied field is changed by registration normalization, such as an empty input list becoming `["text"]`, a maximum output being clamped to the context window, or a partial cost being completed with zero-valued missing SKUs. `fieldSources.cost` identifies where the normalized model field came from; `pricing.source` remains authoritative for whether pricing is known and for base, adjusted, and effective prices. `reasoning` and `thinkingLevelMap` are tracked separately because a Provider may declare reasoning support while OpenRouter supplies the available levels.
+### Public Façade API (`@hyav/pi-provider`)
+
+Capability files imported through the Jiti loader resolve `@hyav/pi-provider` to `core/public-adapters.ts`. This entrypoint exposes all runtime functions and TypeScript types required by built-in and user adapters without exposing Host-only internal APIs (such as `createPiProviderHost` or `loadPiCatalog`):
+
+- **Extension Factories**: `defineProviderExtension`, `defineStatusExtension`, `definePreflightExtension`, `defineTunerExtension`
+- **Validation & Limits**: `MAX_PROVIDER_MODEL_COUNT`, `validateProviderModelDrafts`, `normalizeProviderModels`
+- **Lifecycle Management**: `createModelCatalogLifecycle`
+- **Preflight & Status Helpers**: `createCatalogPreflightAdapter`, `createOpenCodeCatalogPreflightAdapter`, `parseRetryAfter`
+- **HTTP, Deadlines & Errors**: `withDeadline`, `appendBaseUrlPath`, `authDefinesHeader`, `getContextAuth`, `hasBaseUrlOrigin`, `mergeDiagnosticHeaders`, `isProviderDataError`, `ProviderDataError`
+- **Legacy Snapshot Migration**: `isLegacyNormalizedModel`, `isLegacyNormalizedSnapshot`
+- **Types**: `AdapterExtensionContext`, `ProviderExtensionDefinition`, `StatusExtensionDefinition`, `PreflightExtensionDefinition`, `TunerExtensionDefinition`, `ModelCatalogDiagnostics`, `ModelCatalogDiscoveryResult`, `ModelCatalogLifecycle`, `ModelCatalogLifecycleOptions`, `ModelCatalogSource`, `ModelCatalogStatus`, `PreflightAdapter`, `PreflightContextLike`, `PreflightModel`, `PreflightSnapshot`, `StatusContextLike`, `ActiveModel`, `ProviderAdapter`, `ProviderCost`, `ProviderModel`, `ProviderModelDraft`, `ProviderPricingAdjustment`, `ProviderPricingPolicy`, `ProviderPricingSource`, `ProviderRefreshContext`, `ProviderRequestAuth`, `StatusAdapter`, `StatusContext`, `StatusEntry`, `StatusSnapshot`, `StoredCredentialLike`, `ThinkingLevel`, `TunerAdapter`, `TunerContext`
+
+### Capability and Metadata Precedence
+
+Model metadata follows a strict three-tier precedence model:
+
+1. **Provider Explicit Endpoints (Highest Precedence)**: Capabilities explicitly parsed from the Provider endpoint (such as `contextWindow`, `maxTokens`, `cost`, `input`, `reasoning`, `thinkingLevelMap`, and `compat`) take top priority. Explicit false values (`reasoning: false`), explicit zero pricing (`cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }`), and explicit single-modality lists (`input: ["text"]`) are preserved verbatim and never overridden by subsequent tiers.
+2. **Pi Catalog Fallback**: When a field is omitted or undefined in the raw `ProviderModelDraft`, the Pi catalog fallback matches against original manufacturer providers (Anthropic, OpenAI, Google, DeepSeek, Mistral, xAI, MiniMax, Moonshot/Kimi, ZAI, Xiaomi, and Ant-Ling) to populate missing pricing, context limits, reasoning flags, thinking maps, and input modalities. Ambiguous or multi-match candidates are rejected. The fallback only augments models already declared by the provider; it never fabricates new models.
+3. **Default Normalization Fallback (Lowest Precedence)**: If a capability remains undefined after both the Provider endpoint response and Pi catalog fallback, final defaults are applied (`contextWindow: 128_000`, `maxTokens: 16_384`, `cost: 0`, `reasoning: false`, `input: ["text"]`).
+
+### Raw Drafts and Cache Boundary
+
+Dynamic Provider adapters that persist or cache discovered models (such as in Pi's `models-store.json` or local snapshot files) **must persist raw model drafts** (such as `{ id, name, api, baseUrl, provider }`) rather than normalized models with defaulted capabilities (`contextWindow: 128000`, `maxTokens: 16384`, `cost: 0`, `reasoning: false`).
+
+When an adapter injects normalized defaults before persisting, those defaults are treated upon reload or cache restoration as explicit provider-declared capabilities, permanently overriding and suppressing the Pi catalog fallback (such as 1M context windows, 384k output limits, official pricing, reasoning capabilities, and thinking levels).
+
+Adapters migrating from earlier versions that serialized normalized models must detect and invalidate legacy normalized snapshots using `isLegacyNormalizedSnapshot()` so that fresh online discovery restores raw metadata and allows the Pi catalog fallback to enrich models with accurate manufacturer capabilities.
+
+### Credential and Routing Security Boundaries
+
+- **Credential Scoping**: Adapters declare credentials using environment variable references (`$NAME` or `${NAME}`) or OAuth configurations. Diagnostic routines, status snapshots, and logs must never expose or serialize raw API keys, bearer tokens, or secret headers.
+- **Endpoint Route Isolation**: Network requests must remain strictly bounded to the provider's configured origin and baseUrl. Status and preflight checks must avoid sending credentials to unmapped or unexpected hosts.
+
+Status diagnostics support:
+- `/status`: offline inspection of cached diagnostics, compressed single lines (Catalog, Health, Account), merged Thinking levels, and field-level provenance;
+- `/status refresh`: free network refresh of catalogs, health checks, and account status;
+- `/status check`: live probe prompt to verify end-to-end model availability (may incur usage costs).
 
 Other directories use `defineStatusExtension`, `definePreflightExtension`, and `defineTunerExtension`. Identity metadata must be statically provided:
 

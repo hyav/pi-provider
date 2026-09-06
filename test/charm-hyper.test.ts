@@ -760,3 +760,349 @@ test("uses official costs only when upstream pricing is absent", () => {
 	assert.deepEqual(explicit.cost, { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
 	assert.equal(unknown.cost, undefined);
 });
+
+test("invalidates legacy normalized snapshots on restore", async () => {
+	const adapter = createCharmHyperAdapter(
+		async () => new Response(JSON.stringify({ data: [{ id: "online-model" }] }), { status: 200 }),
+		100,
+	);
+	const refreshModels = adapter.provider.refreshModels;
+	assert.ok(refreshModels);
+
+	const legacyStored = {
+		checkedAt: Date.now(),
+		models: [
+			{
+				id: "legacy-model",
+				name: "legacy-model",
+				provider: "charm-hyper",
+				baseUrl: "https://hyper.charm.land/v1",
+				api: "openai-completions" as const,
+				contextWindow: 128_000,
+				maxTokens: 16_384,
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+				reasoning: false,
+				input: ["text" as const],
+			},
+		],
+	};
+
+	const result = await refreshModels(refreshContext({ allowNetwork: false, stored: legacyStored }));
+	assert.equal(result.length, 0);
+	assert.equal(adapter.provider.models.length, 0);
+});
+
+test("Provider explicit endpoint fields take precedence over Pi catalog", async () => {
+	const runtime = resolvePiProviderDependencies();
+	const adapter = createCharmHyperAdapter(
+		async () =>
+			new Response(
+				JSON.stringify({
+					models: [
+						{
+							id: "claude-sonnet-4",
+							name: "Provider Explicit Sonnet",
+							cost_per_1m_in: 5.0,
+							cost_per_1m_out: 25.0,
+							cost_per_1m_in_cached: 1.0,
+							context_window: 300_000,
+							default_max_tokens: 40_000,
+							can_reason: true,
+							supports_attachments: true,
+							reasoning_levels: ["low", "high"],
+						},
+					],
+				}),
+				{ status: 200, headers: { "Content-Type": "application/json" } },
+			),
+		100,
+	);
+
+	const piCatalogSnapshot = {
+		models: {
+			"claude-sonnet-4": {
+				cost: { input: 3.0, output: 15.0, cacheRead: 0.3, cacheWrite: 3.75 },
+				contextWindow: 200_000,
+				maxTokens: 8_192,
+				reasoning: false,
+				input: ["text" as const],
+			},
+		},
+		providers: {},
+	};
+
+	const registered = prepareProviderRegistration(adapter, runtime, piCatalogSnapshot);
+	assert.ok(registered.refreshModels);
+
+	const models = await registered.refreshModels(
+		refreshContext({
+			allowNetwork: true,
+			force: true,
+			credential: { type: "api_key", key: "test-key" },
+		}),
+	);
+
+	assert.equal(models.length, 1);
+	const model = models[0];
+	assert.equal(model.id, "claude-sonnet-4");
+	assert.equal(model.name, "Provider Explicit Sonnet");
+	assert.equal(model.contextWindow, 300_000);
+	assert.equal(model.maxTokens, 40_000);
+	assert.deepEqual(model.cost, { input: 5.0, output: 25.0, cacheRead: 1.0, cacheWrite: 0 });
+	assert.deepEqual(model.input, ["text", "image"]);
+	assert.equal(model.reasoning, true);
+});
+
+test("Provider missing fields are completed by Pi catalog", async () => {
+	const runtime = resolvePiProviderDependencies();
+	const adapter = createCharmHyperAdapter(
+		async () =>
+			new Response(
+				JSON.stringify({
+					data: [{ id: "claude-sonnet-4" }],
+				}),
+				{ status: 200, headers: { "Content-Type": "application/json" } },
+			),
+		100,
+	);
+
+	const piCatalogSnapshot = {
+		models: {
+			"claude-sonnet-4": {
+				cost: { input: 3.0, output: 15.0, cacheRead: 0.3, cacheWrite: 3.75 },
+				contextWindow: 200_000,
+				maxTokens: 8_192,
+				reasoning: true,
+				thinkingLevelMap: { low: "low", high: "high" },
+				input: ["text" as const, "image" as const],
+			},
+		},
+		providers: {},
+	};
+
+	const registered = prepareProviderRegistration(adapter, runtime, piCatalogSnapshot);
+	assert.ok(registered.refreshModels);
+
+	const models = await registered.refreshModels(
+		refreshContext({
+			allowNetwork: true,
+			force: true,
+			credential: { type: "api_key", key: "test-key" },
+		}),
+	);
+
+	assert.equal(models.length, 1);
+	const model = models[0];
+	assert.equal(model.id, "claude-sonnet-4");
+	assert.equal(model.contextWindow, 200_000);
+	assert.equal(model.maxTokens, 8_192);
+	assert.deepEqual(model.cost, { input: 3.0, output: 15.0, cacheRead: 0.3, cacheWrite: 3.75 });
+	assert.deepEqual(model.input, ["text", "image"]);
+	assert.equal(model.reasoning, true);
+	assert.deepEqual(model.thinkingLevelMap, { low: "low", high: "high" });
+});
+
+test("Explicit false, zero price, and text-only input are preserved against Pi catalog", async () => {
+	const runtime = resolvePiProviderDependencies();
+	const adapter = createCharmHyperAdapter(
+		async () =>
+			new Response(
+				JSON.stringify({
+					models: [
+						{
+							id: "claude-sonnet-4",
+							name: "Free Non-reasoning Text Sonnet",
+							cost_per_1m_in: 0,
+							cost_per_1m_out: 0,
+							cost_per_1m_in_cached: 0,
+							context_window: 100_000,
+							default_max_tokens: 4_000,
+							can_reason: false,
+							supports_attachments: false,
+						},
+					],
+				}),
+				{ status: 200, headers: { "Content-Type": "application/json" } },
+			),
+		100,
+	);
+
+	const piCatalogSnapshot = {
+		models: {
+			"claude-sonnet-4": {
+				cost: { input: 3.0, output: 15.0, cacheRead: 0.3, cacheWrite: 3.75 },
+				contextWindow: 200_000,
+				maxTokens: 8_192,
+				reasoning: true,
+				input: ["text" as const, "image" as const],
+			},
+		},
+		providers: {},
+	};
+
+	const registered = prepareProviderRegistration(adapter, runtime, piCatalogSnapshot);
+	assert.ok(registered.refreshModels);
+
+	const models = await registered.refreshModels(
+		refreshContext({
+			allowNetwork: true,
+			force: true,
+			credential: { type: "api_key", key: "test-key" },
+		}),
+	);
+
+	assert.equal(models.length, 1);
+	const model = models[0];
+	assert.equal(model.id, "claude-sonnet-4");
+	assert.equal(model.reasoning, false);
+	assert.deepEqual(model.cost, { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
+	assert.deepEqual(model.input, ["text"]);
+});
+
+test("Invalid models and duplicate models do not overwrite existing valid catalog", async () => {
+	let callCount = 0;
+	const adapter = createCharmHyperAdapter(async () => {
+		callCount++;
+		if (callCount === 1) {
+			return new Response(
+				JSON.stringify({
+					data: [{ id: "valid-initial-model" }],
+				}),
+				{ status: 200, headers: { "Content-Type": "application/json" } },
+			);
+		}
+		return new Response(
+			JSON.stringify({
+				models: [],
+			}),
+			{ status: 200, headers: { "Content-Type": "application/json" } },
+		);
+	}, 100);
+
+	const refreshModels = adapter.provider.refreshModels;
+	assert.ok(refreshModels);
+
+	const first = await refreshModels(refreshContext({ allowNetwork: true }));
+	assert.deepEqual(
+		first.map((m) => m.id),
+		["valid-initial-model"],
+	);
+
+	await assert.rejects(refreshModels(refreshContext({ allowNetwork: true, force: true })));
+
+	assert.deepEqual(
+		adapter.provider.models.map((m) => m.id),
+		["valid-initial-model"],
+	);
+
+	const dupAdapter = createCharmHyperAdapter(
+		async () =>
+			new Response(
+				JSON.stringify({
+					data: [{ id: "dup-model" }, { id: "dup-model" }],
+				}),
+				{ status: 200, headers: { "Content-Type": "application/json" } },
+			),
+		100,
+	);
+	const dupRefresh = dupAdapter.provider.refreshModels;
+	assert.ok(dupRefresh);
+	const deduped = await dupRefresh(refreshContext({ allowNetwork: true }));
+	assert.deepEqual(
+		deduped.map((m) => m.id),
+		["dup-model"],
+	);
+});
+
+test("Successful refresh persists raw drafts without injected normalization defaults", async () => {
+	let persistedEntry: any;
+	const adapter = createCharmHyperAdapter(
+		async () =>
+			new Response(
+				JSON.stringify({
+					data: [{ id: "raw-sparse-model" }],
+				}),
+				{ status: 200, headers: { "Content-Type": "application/json" } },
+			),
+		100,
+	);
+
+	const refreshModels = adapter.provider.refreshModels;
+	assert.ok(refreshModels);
+
+	await refreshModels(
+		refreshContext({
+			allowNetwork: true,
+			force: true,
+			publish: async ({ persist, update }) => {
+				if (persist) persistedEntry = persist;
+				update?.();
+				return true;
+			},
+		}),
+	);
+
+	assert.ok(persistedEntry, "Persisted entry must be provided");
+	assert.equal(persistedEntry.models.length, 1);
+	const persistedModel = persistedEntry.models[0];
+	assert.equal(persistedModel.id, "raw-sparse-model");
+	assert.equal(persistedModel.cost, undefined);
+	assert.equal(persistedModel.reasoning, undefined);
+	assert.equal(persistedModel.contextWindow, undefined);
+	assert.equal(persistedModel.maxTokens, undefined);
+});
+
+test("Legacy normalized snapshot is rejected on restore and triggers online discovery", async () => {
+	let fetchCalls = 0;
+	const adapter = createCharmHyperAdapter(async () => {
+		fetchCalls++;
+		return new Response(
+			JSON.stringify({
+				data: [{ id: "online-fresh-model" }],
+			}),
+			{ status: 200, headers: { "Content-Type": "application/json" } },
+		);
+	}, 100);
+
+	const refreshModels = adapter.provider.refreshModels;
+	assert.ok(refreshModels);
+
+	const legacyStored = {
+		checkedAt: Date.now() - 1000,
+		models: [
+			{
+				id: "legacy-normalized-model",
+				name: "legacy-normalized-model",
+				provider: "charm-hyper",
+				baseUrl: "https://hyper.charm.land/v1",
+				api: "openai-completions" as const,
+				contextWindow: 128_000,
+				maxTokens: 16_384,
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+				reasoning: false,
+				input: ["text" as const],
+			},
+		],
+	};
+
+	const offlineResult = await refreshModels(
+		refreshContext({
+			allowNetwork: false,
+			stored: legacyStored,
+		}),
+	);
+	assert.equal(offlineResult.length, 0);
+	assert.equal(fetchCalls, 0);
+
+	const onlineResult = await refreshModels(
+		refreshContext({
+			allowNetwork: true,
+			stored: legacyStored,
+		}),
+	);
+	assert.equal(fetchCalls, 1);
+	assert.deepEqual(
+		onlineResult.map((m) => m.id),
+		["online-fresh-model"],
+	);
+});

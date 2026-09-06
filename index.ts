@@ -17,7 +17,7 @@ export {
 	defineStatusExtension,
 	defineTunerExtension,
 } from "./core/adapter-extensions.ts";
-export { MAX_PROVIDER_MODEL_COUNT } from "./core/adapter-validation.ts";
+export { MAX_PROVIDER_MODEL_COUNT, validateProviderModelDrafts } from "./core/adapter-validation.ts";
 export { createCatalogPreflightAdapter } from "./core/catalog-preflight.ts";
 export { withDeadline } from "./core/deadline.ts";
 export {
@@ -61,26 +61,18 @@ export type {
 	ModelCatalogLifecycleOptions,
 } from "./core/model-catalog.ts";
 export { createModelCatalogLifecycle } from "./core/model-catalog.ts";
-export {
-	applyOfficialModelCosts,
-	applyOfficialModelMetadata,
-	clearPricingCache,
-	fetchOfficialModelMetadata,
-	fetchOfficialPricing,
-	findOfficialCost,
-	findOfficialMeta,
-	getDefaultOpenRouterMetadataCachePath,
-	getPricingCache,
-	getPricingCacheAge,
-	type OfficialModelMeta,
-	type OfficialModelMetadataFetchOptions,
-	type OfficialPricingFetchOptions,
-	OPENROUTER_MODELS_URL,
-	parseOpenRouterModels,
-	parseOpenRouterPricing,
-	setPricingCache,
-} from "./core/official-pricing.ts";
 export { createOpenCodeCatalogPreflightAdapter } from "./core/opencode-preflight.ts";
+export type { PiCatalogModelMeta, PiCatalogSnapshot } from "./core/pi-model-metadata.ts";
+export {
+	findPiCatalogModel,
+	isLegacyNormalizedModel,
+	isLegacyNormalizedSnapshot,
+	loadPiCatalog,
+	mergeModelWithPiCatalog,
+	ORIGINAL_PI_PROVIDER_ALLOWLIST,
+	parsePiCatalogFromProviders,
+	toPiCatalogSnapshot,
+} from "./core/pi-model-metadata.ts";
 export type {
 	PreflightAdapter,
 	PreflightContext,
@@ -97,18 +89,23 @@ export type { RateLimitWindow } from "./core/ratelimit-headers.ts";
 export { parseRetryAfter } from "./core/retry-after.ts";
 export type { StatusDiagnostics, StatusErrorState } from "./core/status-manager.ts";
 export { normalizeStatusSnapshot, StatusManager } from "./core/status-manager.ts";
+export {
+	formatProviderStatus,
+	getStatusModeCompletions,
+	parseStatusMode,
+} from "./core/status-report.ts";
 export { applyTunerAdapters, sortTunerAdapters } from "./core/tuner-manager.ts";
 export type {
 	ActiveModel,
 	ModelCatalogSource,
 	ModelCatalogStatus,
+	ModelCostBySkuSources,
 	ModelFieldSource,
 	ModelFieldSources,
 	ModelMetadataState,
 	ModelMetadataStatus,
 	ModelPricingDetails,
 	ModelPricingSource,
-	ModelQualityScore,
 	PiApi,
 	PricingSku,
 	ProviderAdapter,

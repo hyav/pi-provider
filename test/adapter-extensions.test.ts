@@ -11,10 +11,10 @@ import {
 	PI_PROVIDER_STARTUP_BRIDGE_EVENT,
 } from "../core/adapter-protocol.ts";
 import { createPiProviderHost } from "../core/host.ts";
-import { clearPricingCache, OPENROUTER_MODELS_URL } from "../core/official-pricing.ts";
 import type { PreflightAdapter } from "../core/preflight-manager.ts";
 import type { ProviderAdapter, StatusAdapter, TunerAdapter } from "../core/types.ts";
 import {
+	createModelCatalogLifecycle,
 	createPiProviderExtension,
 	definePreflightExtension,
 	defineProviderExtension,
@@ -601,8 +601,8 @@ test("Host accepts adapters before or after it, replays session_start, and defer
 		await command.handler("refresh", context);
 
 		assert.equal(pi.providerCalls.filter((id) => id === "sample-provider").length, 2);
-		assert.match(notifications.at(-1)?.message ?? "", /Status: fresh/);
-		assert.match(notifications.at(-1)?.message ?? "", /Preflight: passed · endpoint/);
+		assert.match(notifications.at(-1)?.message ?? "", /Account: fresh/);
+		assert.match(notifications.at(-1)?.message ?? "", /Health: preflight passed · endpoint/);
 		assert.equal(notifications.at(-1)?.level, "info");
 
 		const beforeRequest = pi.handlers.get("before_provider_request")?.[0];
@@ -748,19 +748,19 @@ test("Host isolates malformed envelopes and resolves duplicate IDs to the latest
 	assert.ok(pi.providers.has("status-provider"));
 	assert.ok(pi.providers.has("preflight-provider"));
 	assert.equal(pi.providers.get("conflict-provider")?.models[0]?.id, "two");
-	assert.match(notifications.at(-1) ?? "", /Status: fresh/);
+	assert.match(notifications.at(-1) ?? "", /Account: fresh/);
 
 	const statusProviderContext = createContext(pi, "status-provider");
 	const conflictNotifications: string[] = [];
 	statusProviderContext.ui.notify = (message) => conflictNotifications.push(message);
 	await command.handler("refresh", statusProviderContext);
-	assert.match(conflictNotifications.at(-1) ?? "", /Status: fresh/);
+	assert.match(conflictNotifications.at(-1) ?? "", /Account: fresh/);
 
 	const preflightContext = createContext(pi, "preflight-provider");
 	const preflightNotifications: string[] = [];
 	preflightContext.ui.notify = (message) => preflightNotifications.push(message);
 	await command.handler("refresh", preflightContext);
-	assert.match(preflightNotifications.at(-1) ?? "", /Preflight: passed/);
+	assert.match(preflightNotifications.at(-1) ?? "", /Health: preflight passed/);
 
 	const beforeRequest = pi.handlers.get("before_provider_request")?.[0];
 	assert.ok(beforeRequest);
@@ -768,264 +768,82 @@ test("Host isolates malformed envelopes and resolves duplicate IDs to the latest
 	assert.deepEqual(transformed, { order: ["second", "good"] });
 });
 
-test("Host reapplies official pricing when it re-registers an accepted Provider", async () => {
+test("Host applies Pi catalog fallback when it registers an accepted Provider", async () => {
 	const pi = new TestPi();
-	const host = createPiProviderHost({
-		enableOfficialPricingFallback: true,
-		officialPricingUrl: "https://pricing.invalid/models",
-		fetch: async () =>
-			new Response(
-				JSON.stringify({
-					data: [
-						{
-							id: "pricing-model",
-							pricing: { prompt: "0.000001", completion: "0.000002" },
-						},
-					],
-				}),
-				{ status: 200 },
-			),
-	});
+	const host = createPiProviderHost();
 	host(pi as unknown as ExtensionAPI);
 	const providerFactory = defineProviderExtension({
-		id: "pricing-provider",
+		id: "catalog-fallback-provider",
 		create: () => ({
-			id: "pricing-provider",
+			id: "catalog-fallback-provider",
 			provider: {
-				name: "Generic Pricing Provider",
-				baseUrl: "https://pricing.invalid/v1",
-				apiKey: "$GENERIC_PRICING_KEY",
+				name: "Catalog Fallback Provider",
+				baseUrl: "https://fallback.invalid/v1",
+				apiKey: "$FALLBACK_KEY",
 				api: "openai-completions",
-				models: [{ id: "pricing-model" }],
+				models: [{ id: "deepseek-v4-flash" }],
 			},
 		}),
 	});
 	await providerFactory(pi as unknown as ExtensionAPI);
-	assert.equal(pi.providers.get("pricing-provider")?.models[0]?.cost.input, 0);
-	const context = createContext(pi, "pricing-provider", "pricing-model");
+	const context = createContext(pi, "catalog-fallback-provider", "deepseek-v4-flash");
 	await pi.emit("session_start", { type: "session_start", reason: "startup" }, context);
 	await pi.commands.get("status").handler("", context);
-	for (let attempt = 0; attempt < 20 && pi.providers.get("pricing-provider")?.models[0]?.cost.input !== 1; attempt++) {
-		await new Promise((resolve) => setImmediate(resolve));
-	}
-	assert.equal(pi.providers.get("pricing-provider")?.models[0]?.cost.input, 1);
-	assert.equal(pi.providers.get("pricing-provider")?.models[0]?.cost.output, 2);
+
+	const registered = pi.providers.get("catalog-fallback-provider");
+	assert.ok(registered);
+	const model = registered.models[0];
+	assert.ok(model);
+	assert.equal(model.id, "deepseek-v4-flash");
+	assert.ok(model.contextWindow >= 64_000);
+	assert.ok(model.cost.input > 0);
 });
 
-test("Host defers OpenRouter metadata network access until session_start", async () => {
-	clearPricingCache(OPENROUTER_MODELS_URL);
+test("Host does not make network requests to OpenRouter on session_start", async () => {
 	let requests = 0;
-	try {
-		const pi = new TestPi();
-		createPiProviderHost({
-			fetch: async () => {
+	const pi = new TestPi();
+	createPiProviderHost({
+		fetch: async (input) => {
+			if (input.toString().includes("openrouter.ai")) {
 				requests++;
-				return new Response(JSON.stringify({ data: [] }), { status: 200 });
+			}
+			return new Response(JSON.stringify({ data: [] }), { status: 200 });
+		},
+	})(pi as unknown as ExtensionAPI);
+
+	const context = createContext(pi, "unused-provider");
+	await pi.emit("session_start", { type: "session_start", reason: "startup" }, context);
+	await new Promise((resolve) => setImmediate(resolve));
+	assert.equal(requests, 0);
+});
+
+test("Host preserves a dynamically refreshed catalog", async () => {
+	const pi = new TestPi();
+	const host = createPiProviderHost();
+	host(pi as unknown as ExtensionAPI);
+	const providerFactory = defineProviderExtension({
+		id: "host-dynamic-provider",
+		create: () => ({
+			id: "host-dynamic-provider",
+			provider: {
+				name: "Host Dynamic Provider",
+				baseUrl: "https://provider.invalid/v1",
+				apiKey: "$HOST_DYNAMIC_KEY",
+				api: "openai-completions",
+				models: [{ id: "initial-model" }],
+				refreshModels: async () => [{ id: "dynamic-model" }],
 			},
-			officialPricingCacheTtlMs: 0,
-			openRouterMetadataCachePath: "",
-		})(pi as unknown as ExtensionAPI);
-
-		await new Promise((resolve) => setImmediate(resolve));
-		assert.equal(requests, 0);
-
-		const context = createContext(pi, "unused-provider");
-		await pi.emit("session_start", { type: "session_start", reason: "startup" }, context);
-		for (let attempt = 0; attempt < 20 && requests === 0; attempt++) {
-			await new Promise((resolve) => setImmediate(resolve));
-		}
-		assert.equal(requests, 1);
-	} finally {
-		clearPricingCache(OPENROUTER_MODELS_URL);
-	}
-});
-
-test("Host cancels its metadata request during session shutdown", async () => {
-	clearPricingCache(OPENROUTER_MODELS_URL);
-	let requestSignal: AbortSignal | undefined;
-	let signalStarted: (() => void) | undefined;
-	const started = new Promise<void>((resolve) => {
-		signalStarted = resolve;
+		}),
 	});
-	const fetchFn = (async (_input, init) => {
-		requestSignal = init?.signal ?? undefined;
-		signalStarted?.();
-		return await new Promise<Response>((_resolve, reject) => {
-			requestSignal?.addEventListener("abort", () => reject(requestSignal?.reason), { once: true });
-		});
-	}) as typeof globalThis.fetch;
-	try {
-		const pi = new TestPi();
-		createPiProviderHost({
-			fetch: fetchFn,
-			officialPricingTimeoutMs: 1_000,
-			officialPricingCacheTtlMs: 0,
-			openRouterMetadataCachePath: "",
-		})(pi as unknown as ExtensionAPI);
-		const context = createContext(pi, "unused-provider");
-		await pi.emit("session_start", { type: "session_start", reason: "startup" }, context);
-		await started;
-		assert.equal(requestSignal?.aborted, false);
+	await providerFactory(pi as unknown as ExtensionAPI);
+	const context = createContext(pi, "host-dynamic-provider", "initial-model");
+	await pi.emit("session_start", { type: "session_start", reason: "startup" }, context);
+	await pi.commands.get("status").handler("", context);
 
-		await pi.emit("session_shutdown", { type: "session_shutdown", reason: "test" }, context);
-		assert.equal(requestSignal?.aborted, true);
-	} finally {
-		clearPricingCache(OPENROUTER_MODELS_URL);
-	}
-});
-
-test("Host reapplies OpenRouter metadata after a non-blocking refresh", async () => {
-	const root = await mkdtemp(join(tmpdir(), "pi-provider-host-pricing-"));
-	clearPricingCache(OPENROUTER_MODELS_URL);
-	let release: (() => void) | undefined;
-	let signalStarted: (() => void) | undefined;
-	const fetchStarted = new Promise<void>((resolve) => {
-		signalStarted = resolve;
-	});
-	const fetchFn = (async (input) => {
-		assert.equal(input.toString(), OPENROUTER_MODELS_URL);
-		signalStarted?.();
-		await new Promise<void>((resolve) => {
-			release = resolve;
-		});
-		return new Response(
-			JSON.stringify({
-				data: [
-					{
-						id: "reference/host-pricing-model",
-						pricing: { prompt: "0.000001", completion: "0.000002" },
-					},
-				],
-			}),
-			{ status: 200 },
-		);
-	}) as typeof globalThis.fetch;
-	try {
-		const pi = new TestPi();
-		createPiProviderHost({
-			fetch: fetchFn,
-			officialPricingCacheTtlMs: 0,
-			openRouterMetadataCachePath: join(root, "metadata.json"),
-		})(pi as unknown as ExtensionAPI);
-		const providerFactory = defineProviderExtension({
-			id: "host-background-pricing",
-			create: () => ({
-				id: "host-background-pricing",
-				provider: {
-					name: "Host Background Pricing",
-					baseUrl: "https://provider.invalid/v1",
-					apiKey: "$HOST_BACKGROUND_PRICING_KEY",
-					api: "openai-completions",
-					models: [{ id: "host-pricing-model" }],
-				},
-			}),
-		});
-		await providerFactory(pi as unknown as ExtensionAPI);
-		assert.equal(pi.providers.get("host-background-pricing")?.models[0]?.cost.input, 0);
-
-		const context = createContext(pi, "host-background-pricing", "host-pricing-model");
-		await pi.emit("session_start", { type: "session_start", reason: "startup" }, context);
-		await pi.commands.get("status").handler("", context);
-		await fetchStarted;
-		release?.();
-		for (
-			let attempt = 0;
-			attempt < 100 && pi.providers.get("host-background-pricing")?.models[0]?.cost.input !== 1;
-			attempt++
-		) {
-			await new Promise((resolve) => setTimeout(resolve, 10));
-		}
-		assert.equal(pi.providers.get("host-background-pricing")?.models[0]?.cost.input, 1);
-		assert.equal(pi.providers.get("host-background-pricing")?.models[0]?.cost.output, 2);
-	} finally {
-		clearPricingCache(OPENROUTER_MODELS_URL);
-		await rm(root, { recursive: true, force: true });
-	}
-});
-
-test("Host preserves a dynamically refreshed catalog when background pricing arrives", async () => {
-	const root = await mkdtemp(join(tmpdir(), "pi-provider-host-dynamic-pricing-"));
-	clearPricingCache(OPENROUTER_MODELS_URL);
-	let release: (() => void) | undefined;
-	let signalStarted: (() => void) | undefined;
-	const fetchStarted = new Promise<void>((resolve) => {
-		signalStarted = resolve;
-	});
-	const fetchFn = (async (input) => {
-		assert.equal(input.toString(), OPENROUTER_MODELS_URL);
-		signalStarted?.();
-		await new Promise<void>((resolve) => {
-			release = resolve;
-		});
-		return new Response(
-			JSON.stringify({
-				data: [
-					{
-						id: "reference/dynamic-pricing-model",
-						pricing: { prompt: "0.000001", completion: "0.000002" },
-					},
-				],
-			}),
-			{ status: 200 },
-		);
-	}) as typeof globalThis.fetch;
-	try {
-		const pi = new TestPi();
-		createPiProviderHost({
-			fetch: fetchFn,
-			officialPricingCacheTtlMs: 0,
-			openRouterMetadataCachePath: join(root, "metadata.json"),
-		})(pi as unknown as ExtensionAPI);
-		const providerFactory = defineProviderExtension({
-			id: "host-dynamic-pricing",
-			create: () => ({
-				id: "host-dynamic-pricing",
-				provider: {
-					name: "Host Dynamic Pricing",
-					baseUrl: "https://provider.invalid/v1",
-					apiKey: "$HOST_DYNAMIC_PRICING_KEY",
-					api: "openai-completions",
-					models: [{ id: "initial-model" }],
-					refreshModels: async () => [{ id: "dynamic-pricing-model" }],
-				},
-			}),
-		});
-		await providerFactory(pi as unknown as ExtensionAPI);
-		const context = createContext(pi, "host-dynamic-pricing", "initial-model");
-		await pi.emit("session_start", { type: "session_start", reason: "startup" }, context);
-		await pi.commands.get("status").handler("", context);
-		await fetchStarted;
-
-		const registered = pi.providers.get("host-dynamic-pricing");
-		await registered.refreshModels({} as any);
-		assert.equal(pi.providers.get("host-dynamic-pricing")?.models[0]?.id, "dynamic-pricing-model");
-		release?.();
-
-		await new Promise<void>((resolve, reject) => {
-			let stopped = false;
-			const timer = setTimeout(() => {
-				stopped = true;
-				reject(new Error("background metadata refresh did not re-register the dynamic Provider"));
-			}, 1_000);
-			const poll = () => {
-				if (stopped) return;
-				if (pi.providerCalls.filter((id) => id === "host-dynamic-pricing").length >= 3) {
-					stopped = true;
-					clearTimeout(timer);
-					resolve();
-					return;
-				}
-				setImmediate(poll);
-			};
-			poll();
-		});
-
-		assert.equal(pi.providers.get("host-dynamic-pricing")?.models[0]?.id, "dynamic-pricing-model");
-		assert.equal(pi.providers.get("host-dynamic-pricing")?.models[0]?.cost.input, 1);
-	} finally {
-		clearPricingCache(OPENROUTER_MODELS_URL);
-		await rm(root, { recursive: true, force: true });
-	}
+	const registered = pi.providers.get("host-dynamic-provider");
+	assert.ok(registered);
+	await registered.refreshModels({} as any);
+	assert.equal(pi.providers.get("host-dynamic-provider")?.models[0]?.id, "dynamic-model");
 });
 
 test("Host can bind a Status Adapter to a native Pi provider", async () => {
@@ -1044,7 +862,7 @@ test("Host can bind a Status Adapter to a native Pi provider", async () => {
 	const notifications: string[] = [];
 	context.ui.notify = (message) => notifications.push(message);
 	await pi.commands.get("status").handler("refresh", context);
-	assert.match(notifications.at(-1) ?? "", /Status: fresh/);
+	assert.match(notifications.at(-1) ?? "", /Account: fresh/);
 });
 
 test("tuner ordering is deterministic for equal priorities", async () => {
@@ -1104,7 +922,7 @@ test("Host shutdown removes listeners and a reloaded Host starts with fresh mana
 	secondContext.ui.notify = (message) => secondNotifications.push(message);
 	await secondPi.commands.get("status").handler("", secondContext);
 	assert.equal(statusCalls.count, 1);
-	assert.match(secondNotifications.at(-1) ?? "", /Status: not supported/);
+	assert.match(secondNotifications.at(-1) ?? "", /Account: not supported/);
 
 	const thirdPi = new TestPi();
 	const thirdHost = createPiProviderHost({ enableOfficialPricingFallback: false });
@@ -1253,4 +1071,94 @@ test("index.ts remains strictly decoupled with zero static imports to capability
 			`index.ts must not statically import from ./${dir} to ensure drop-in capability files remain autonomous`,
 		);
 	}
+});
+
+test("Host rehydration of dynamic adapter preserves models on subsequent cache-only refresh", async () => {
+	const pi = new TestPi();
+	const factory = defineProviderExtension({
+		id: "dynamic-rehydrate-provider",
+		create: () => {
+			let provider: any;
+			const lifecycle = createModelCatalogLifecycle({
+				ttlMs: 60_000,
+				discover: () => [{ id: "model-alpha" }, { id: "model-beta" }],
+				restore: () => undefined,
+				persist: (models, checkedAt) => ({ models: models as any, checkedAt }),
+				onUpdate: (models) => {
+					if (provider) provider.models = models;
+				},
+				errorCode: () => "error",
+			});
+			provider = {
+				name: "Dynamic Rehydrate Provider",
+				baseUrl: "https://api.example.com/v1",
+				apiKey: "test-key",
+				api: "openai-completions",
+				models: lifecycle.getModels(),
+				refreshModels: lifecycle.refreshModels,
+			};
+			return {
+				id: "dynamic-rehydrate-provider",
+				provider,
+				catalog: lifecycle.catalog,
+				lifecycle,
+			};
+		},
+	});
+
+	await factory(pi as unknown as ExtensionAPI);
+	const host = createPiProviderHost({ enableOfficialPricingFallback: false });
+	host(pi as unknown as ExtensionAPI);
+
+	const context = createContext(pi, "dynamic-rehydrate-provider");
+	await pi.emit("session_start", { type: "session_start", reason: "startup" }, context);
+	await pi.commands.get("status").handler("check", context);
+
+	const registered = pi.providers.get("dynamic-rehydrate-provider");
+	assert.ok(registered);
+
+	// Perform initial dynamic refresh
+	const refreshed = await registered.refreshModels({
+		allowNetwork: true,
+		force: true,
+		signal: new AbortController().signal,
+		publish: async ({ update }: any) => {
+			update?.();
+			return true;
+		},
+	});
+	assert.deepEqual(
+		refreshed.map((m: any) => m.id),
+		["model-alpha", "model-beta"],
+	);
+
+	// Rebuild the adapter via session_start
+	await pi.emit("session_start", { type: "session_start", reason: "reload" }, context);
+	await pi.commands.get("status").handler("check", context);
+
+	const rebuilt = pi.providers.get("dynamic-rehydrate-provider");
+	assert.ok(rebuilt);
+	assert.deepEqual(
+		rebuilt.models.map((m: any) => m.id),
+		["model-alpha", "model-beta"],
+	);
+
+	// Cache-only refresh should NOT wipe out models
+	const cacheRefreshed = await rebuilt.refreshModels({
+		allowNetwork: false,
+		force: false,
+		signal: new AbortController().signal,
+		publish: async ({ update }: any) => {
+			update?.();
+			return true;
+		},
+	});
+	assert.deepEqual(
+		cacheRefreshed.map((m: any) => m.id),
+		["model-alpha", "model-beta"],
+	);
+	assert.deepEqual(
+		rebuilt.models.map((m: any) => m.id),
+		["model-alpha", "model-beta"],
+	);
 });

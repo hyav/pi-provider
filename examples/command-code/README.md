@@ -16,5 +16,3 @@ To use it as a user adapter, copy the contents into:
 ```
 
 The implementation reads `COMMAND_CODE_API_KEY` and supported aliases, and may also read Command Code credential files from the current user's home directory. Do not commit credentials or local metadata caches.
-
-The optional `openrouter-model-metadata.json` file used by the original local installation is not part of this reference directory; the catalog falls back to its built-in metadata when it is absent.

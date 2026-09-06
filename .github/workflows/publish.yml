@@ -81,7 +81,6 @@ jobs:
           agent_dir="$RUNNER_TEMP/pi-agent"
           cache_dir="$agent_dir/extensions/pi-provider"
           mkdir -p "$cache_dir"
-          node -e 'const fs = require("node:fs"); fs.writeFileSync(process.argv[1], JSON.stringify({ version: 3, sourceUrl: "https://openrouter.ai/api/v1/models", updatedAt: Date.now(), snapshot: {} }) + "\n")' "$cache_dir/openrouter-model-metadata.json"
           echo "PI_CODING_AGENT_DIR=$agent_dir" >> "$GITHUB_ENV"
 
       - name: Run verification gate

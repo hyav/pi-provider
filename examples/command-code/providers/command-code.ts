@@ -6,10 +6,11 @@ import type {
 } from "@hyav/pi-provider";
 import {
 	defineProviderExtension,
+	isLegacyNormalizedSnapshot,
 	isProviderDataError,
-	normalizeProviderModels,
 	ProviderDataError,
 	parseRetryAfter,
+	validateProviderModelDrafts,
 	withDeadline,
 } from "@hyav/pi-provider";
 import { resolveCommandCodeApiKey, syncCommandCodeEnv } from "./command-code/auth.ts";
@@ -55,8 +56,10 @@ function catalogErrorCode(error: unknown): string {
 }
 
 type CommandCodeModelsStoreEntry = ProviderRefreshContext["stored"];
-type CommandCodeStoredModel = NonNullable<CommandCodeModelsStoreEntry>["models"][number] & {
-	pricingSource?: ProviderModelDraft["pricingSource"];
+type CommandCodeStoredModel = ProviderModelDraft & {
+	provider: string;
+	baseUrl: string;
+	api: ProviderModelDraft["api"];
 };
 
 function isValidTimestamp(value: unknown): value is number {
@@ -65,6 +68,7 @@ function isValidTimestamp(value: unknown): value is number {
 
 function draftsFromStoredModels(entry: CommandCodeModelsStoreEntry): ProviderModelDraft[] | undefined {
 	if (!entry || !Array.isArray(entry.models) || entry.models.length === 0) return undefined;
+	if (isLegacyNormalizedSnapshot(entry.models)) return undefined;
 	const drafts: ProviderModelDraft[] = [];
 	const seenIds = new Set<string>();
 
@@ -86,7 +90,7 @@ function draftsFromStoredModels(entry: CommandCodeModelsStoreEntry): ProviderMod
 
 	if (drafts.length === 0) return undefined;
 	try {
-		normalizeProviderModels(drafts);
+		validateProviderModelDrafts(drafts);
 		return drafts;
 	} catch {
 		return undefined;
@@ -94,10 +98,12 @@ function draftsFromStoredModels(entry: CommandCodeModelsStoreEntry): ProviderMod
 }
 
 function storedModelsFromDrafts(models: ProviderModelDraft[]): CommandCodeStoredModel[] {
-	return normalizeProviderModels(models).map((model) => {
-		const source = models.find(({ id }) => id === model.id)?.pricingSource;
+	validateProviderModelDrafts(models);
+	return models.map((model) => {
+		const source = model.pricingSource;
 		return {
 			...model,
+			name: typeof model.name === "string" && model.name.trim() !== "" ? model.name.trim() : model.id,
 			...(source ? { pricingSource: source } : {}),
 			api: model.api ?? "openai-completions",
 			provider: COMMAND_CODE_PROVIDER_ID,
@@ -114,7 +120,10 @@ async function publishCatalog(
 ): Promise<boolean> {
 	try {
 		return await context.publish({
-			persist: { models: storedModelsFromDrafts(models), checkedAt },
+			persist: {
+				models: storedModelsFromDrafts(models) as unknown as NonNullable<CommandCodeModelsStoreEntry>["models"],
+				checkedAt,
+			},
 			update,
 		});
 	} catch {

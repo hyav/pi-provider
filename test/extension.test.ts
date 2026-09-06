@@ -1,12 +1,10 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { visibleWidth } from "@earendil-works/pi-tui";
 import type { PiProviderDefinition, PiProviderDependencies } from "../core/extension.ts";
 import { createPiProviderRuntime } from "../core/extension.ts";
-import { clearPricingCache, OPENROUTER_MODELS_URL } from "../core/official-pricing.ts";
 import { StatusManager } from "../core/status-manager.ts";
 import type { ProviderAdapter, StatusSnapshot } from "../core/types.ts";
 import * as indexExports from "../index.ts";
@@ -166,115 +164,39 @@ test("schedules one non-blocking model catalog refresh for an explicit runtime",
 	assert.equal(refreshCalls, 2);
 });
 
-test("reapplies background official metadata after startup registration", async () => {
-	const cacheRoot = await mkdtemp(join(tmpdir(), "pi-provider-background-runtime-"));
-	clearPricingCache(OPENROUTER_MODELS_URL);
-	let release: (() => void) | undefined;
-	let signalStarted: (() => void) | undefined;
-	const fetchStarted = new Promise<void>((resolve) => {
-		signalStarted = resolve;
-	});
-	const fetchFn = (async (input) => {
-		assert.equal(input.toString(), OPENROUTER_MODELS_URL);
-		signalStarted?.();
-		await new Promise<void>((resolve) => {
-			release = resolve;
-		});
-		return new Response(
-			JSON.stringify({
-				data: [
-					{
-						id: "reference/background-model",
-						pricing: { prompt: "0.000001", completion: "0.000002" },
-						benchmarks: {
-							artificial_analysis: { intelligence_index: 48.5 },
-						},
-					},
-				],
-			}),
-			{ status: 200 },
-		);
-	}) as typeof globalThis.fetch;
+test("applies Pi catalog fallback during runtime initialization", async () => {
 	let adapter: ProviderAdapter | undefined;
-	const extension = createPiProviderRuntime(
-		async () => {
-			adapter = {
-				id: "background-provider",
-				provider: {
-					name: "Background Provider",
-					baseUrl: "https://example.com/v1",
-					apiKey: "$BACKGROUND_PROVIDER_KEY",
-					api: "openai-completions",
-					models: [{ id: "background-model" }],
-				},
-			};
-			return { providers: [adapter] };
-		},
-		{
-			fetch: fetchFn,
-			officialPricingCacheTtlMs: 0,
-			openRouterMetadataCachePath: join(cacheRoot, "metadata.json"),
-		},
-	);
+	const extension = createPiProviderRuntime(async () => {
+		adapter = {
+			id: "fallback-provider",
+			provider: {
+				name: "Fallback Provider",
+				baseUrl: "https://example.com/v1",
+				apiKey: "$FALLBACK_PROVIDER_KEY",
+				api: "openai-completions",
+				models: [{ id: "deepseek-v4-flash" }],
+			},
+		};
+		return { providers: [adapter] };
+	});
 	const registrations: Array<{ id: string; config: any }> = [];
 	const handlers = new Map<string, Array<(event: any, context: any) => unknown>>();
-	try {
-		await extension({
-			registerProvider(id: string, config: any) {
-				registrations.push({ id, config });
-			},
-			on(event: string, handler: (event: any, context: any) => unknown) {
-				const current = handlers.get(event) ?? [];
-				current.push(handler);
-				handlers.set(event, current);
-			},
-			registerCommand() {},
-		} as any);
+	await extension({
+		registerProvider(id: string, config: any) {
+			registrations.push({ id, config });
+		},
+		on(event: string, handler: (event: any, context: any) => unknown) {
+			const current = handlers.get(event) ?? [];
+			current.push(handler);
+			handlers.set(event, current);
+		},
+		registerCommand() {},
+	} as any);
 
-		assert.deepEqual(registrations[0]?.config.models?.[0]?.cost, {
-			input: 0,
-			output: 0,
-			cacheRead: 0,
-			cacheWrite: 0,
-		});
-		assert.equal(release, undefined);
-		for (const handler of handlers.get("session_start") ?? []) {
-			await handler({ reason: "startup" }, { modelRegistry: { refresh: async () => undefined } });
-		}
-		await fetchStarted;
-		(release as (() => void) | undefined)?.();
-
-		await new Promise<void>((resolve, reject) => {
-			let stopped = false;
-			const timer = setTimeout(() => {
-				stopped = true;
-				reject(new Error("background metadata refresh did not re-register the Provider"));
-			}, 1_000);
-			const poll = () => {
-				if (stopped) return;
-				if (registrations.length >= 2) {
-					stopped = true;
-					clearTimeout(timer);
-					resolve();
-					return;
-				}
-				setImmediate(poll);
-			};
-			poll();
-		});
-
-		assert.deepEqual(registrations.at(-1)?.config.models?.[0]?.cost, {
-			input: 1,
-			output: 2,
-			cacheRead: 0,
-			cacheWrite: 0,
-		});
-		assert.equal(adapter?.registration?.modelMetadata?.["background-model"]?.pricing.source, "official");
-		assert.equal(adapter?.registration?.modelMetadata?.["background-model"]?.quality?.[0]?.category, "intelligence");
-	} finally {
-		clearPricingCache(OPENROUTER_MODELS_URL);
-		await rm(cacheRoot, { recursive: true, force: true });
-	}
+	assert.equal(registrations.length, 1);
+	assert.ok(registrations[0]?.config.models?.[0]?.contextWindow >= 64_000);
+	assert.ok(registrations[0]?.config.models?.[0]?.cost.input > 0);
+	assert.equal(adapter?.registration?.modelMetadata?.["deepseek-v4-flash"]?.pricing.source, "pi");
 });
 
 test("offers filtered status mode completions with descriptions", async () => {
@@ -475,7 +397,7 @@ test("distinguishes live and cached status reports with compact sections", async
 	assert.doesNotMatch(notifications.at(-1)?.message ?? "", /\[(accent|dim)\]/);
 
 	await commands.status.handler("", ctx);
-	assert.match(notifications.at(-1)?.message ?? "", /Account:\n {2}Status: fresh/);
+	assert.match(notifications.at(-1)?.message ?? "", /Account: fresh/);
 	assert.doesNotMatch(notifications.at(-1)?.message ?? "", /^(↻|◌|✓)/);
 });
 
@@ -800,7 +722,7 @@ test("runs one minimal live check for the active provider and model on check", a
 	assert.ok(liveCheckRequests[0]?.options.signal instanceof AbortSignal);
 	assert.match(notifications.at(-1) ?? "", /^Provider: check-provider\n/);
 	assert.doesNotMatch(notifications.at(-1) ?? "", /\[(accent|dim)\]/);
-	assert.match(notifications.at(-1) ?? "", /Availability: verified/);
+	assert.match(notifications.at(-1) ?? "", /availability verified/);
 	assert.match(notifications.at(-1) ?? "", /Live check: success · HTTP 200 OK · \d+ms/);
 	assert.match(
 		notifications.at(-1) ?? "",
@@ -812,7 +734,7 @@ test("runs one minimal live check for the active provider and model on check", a
 	assert.equal(liveCheckRequests.length, 2);
 	assert.match(notifications.at(-1) ?? "", /^Provider: check-provider\n/);
 	assert.doesNotMatch(notifications.at(-1) ?? "", /\[(accent|dim)\]/);
-	assert.match(notifications.at(-1) ?? "", /Availability: verified/);
+	assert.match(notifications.at(-1) ?? "", /availability verified/);
 	assert.match(notifications.at(-1) ?? "", /Live check: success · HTTP 200 OK · \d+ms/);
 });
 
@@ -980,7 +902,7 @@ test("refreshes free preflight without running a paid live check", async () => {
 	await commands.status.handler("refresh", ctx);
 	assert.equal(preflightRequests, 1);
 	assert.equal(liveCheckRequests, 0);
-	assert.match(notifications.at(-1) ?? "", /Preflight: passed · endpoint\/auth\/catalog/);
+	assert.match(notifications.at(-1) ?? "", /Health: preflight passed · endpoint\/auth\/catalog/);
 });
 
 test("keeps preflight caches separate for each active model", async () => {
@@ -1032,7 +954,7 @@ test("keeps preflight caches separate for each active model", async () => {
 	await commands.status.handler("refresh", ctx);
 
 	assert.equal(requests, 2);
-	assert.match(notifications.at(-1) ?? "", /Preflight: failed · catalog/);
+	assert.match(notifications.at(-1) ?? "", /Health: preflight failed · catalog/);
 });
 
 test("keeps the last successful live check when a later live check fails", async () => {
@@ -1074,13 +996,13 @@ test("keeps the last successful live check when a later live check fails", async
 	await commands.status.handler("check", ctx);
 
 	assert.equal(attempts, 2);
-	assert.match(notifications.at(-1)?.message ?? "", /Availability: stale/);
+	assert.match(notifications.at(-1)?.message ?? "", /availability stale/);
 	assert.match(notifications.at(-1)?.message ?? "", /Live check: last success · HTTP 200 OK · \d+ms/);
 	assert.match(notifications.at(-1)?.message ?? "", /Live check error: upstream/);
 	assert.equal(notifications.at(-1)?.level, "warning");
 
 	await commands.status.handler("", ctx);
-	assert.match(notifications.at(-1)?.message ?? "", /Availability: stale/);
+	assert.match(notifications.at(-1)?.message ?? "", /availability stale/);
 	assert.equal(notifications.at(-1)?.level, "info");
 });
 
@@ -1217,7 +1139,7 @@ test("reports a live check timeout without hanging the check command", async () 
 	});
 	await Promise.race([commands.status.handler("check", ctx), deadline]);
 
-	assert.match(notifications.at(-1)?.message ?? "", /Availability: failed/);
+	assert.match(notifications.at(-1)?.message ?? "", /availability failed/);
 	assert.match(notifications.at(-1)?.message ?? "", /Live check error: timeout/);
 	assert.equal(notifications.at(-1)?.level, "warning");
 });
@@ -1437,7 +1359,7 @@ test("clears status presentation on an expired model restore without requesting 
 	await commands.status.handler("", ctx);
 	assert.equal(requests, 1);
 	assert.equal(notifications.length, notificationCount + 1);
-	assert.match(notifications.at(-1) ?? "", /Status: stale/);
+	assert.match(notifications.at(-1) ?? "", /Account: stale/);
 });
 
 test("does not warn when an active model has no auth configured", async () => {
@@ -1460,11 +1382,11 @@ test("does not warn when an active model has no auth configured", async () => {
 	await commands.status.handler("", ctx);
 
 	assert.match(notifications.at(-1)?.message ?? "", /Auth: missing/);
-	assert.match(notifications.at(-1)?.message ?? "", /Status: unavailable · auth missing/);
+	assert.match(notifications.at(-1)?.message ?? "", /Account: unavailable · auth missing/);
 	assert.equal(notifications.at(-1)?.level, "info");
 
 	await commands.status.handler("check", ctx);
-	assert.match(notifications.at(-1)?.message ?? "", /Availability: skipped · auth missing/);
+	assert.match(notifications.at(-1)?.message ?? "", /availability skipped · auth missing/);
 	assert.equal(notifications.at(-1)?.level, "info");
 });
 
@@ -1541,7 +1463,7 @@ test("does not render cached status on model selection", async () => {
 	assert.equal(notifications.length, 1);
 	assert.match(notifications.at(-1) ?? "", /Model: model/);
 	assert.doesNotMatch(notifications.at(-1) ?? "", /next-model/);
-	assert.match(notifications.at(-1) ?? "", /Balance: 1 credits/);
+	assert.match(notifications.at(-1) ?? "", /balance 1 credits/);
 });
 
 test("does not fetch or render status during model selection", async () => {
@@ -1596,12 +1518,12 @@ test("keeps a stale status snapshot and recovers on a later query", async () => 
 
 	await commands.status.handler("refresh", ctx);
 	await commands.status.handler("refresh", ctx);
-	assert.match(notifications.at(-1) ?? "", /Status: stale/);
-	assert.match(notifications.at(-1) ?? "", /Balance: 80 credits/);
+	assert.match(notifications.at(-1) ?? "", /Account: stale/);
+	assert.match(notifications.at(-1) ?? "", /balance 80 credits/);
 	assert.match(notifications.at(-1) ?? "", /Error: fetch/);
 
 	await commands.status.handler("refresh", ctx);
-	assert.match(notifications.at(-1) ?? "", /Status: fresh/);
+	assert.match(notifications.at(-1) ?? "", /Account: fresh/);
 	assert.equal(requests, 3);
 });
 
@@ -1655,8 +1577,8 @@ test("queries Charm Hyper status on demand", async () => {
 			authorization: "Bearer test-key",
 		},
 	);
-	assert.match(notifications.at(-1) ?? "", /Status: fresh/);
-	assert.match(notifications.at(-1) ?? "", /Balance: 75 credits/);
+	assert.match(notifications.at(-1) ?? "", /Account: fresh/);
+	assert.match(notifications.at(-1) ?? "", /balance 75 credits/);
 });
 
 test("reports effective reasoning levels from Pi's sparse model map", async () => {
@@ -1686,7 +1608,7 @@ test("reports effective reasoning levels from Pi's sparse model map", async () =
 	};
 
 	await commands.status.handler("", ctx);
-	assert.match(notifications.at(-1) ?? "", /Reasoning: supported \(off, minimal, low, medium, high, xhigh, max\)/);
+	assert.match(notifications.at(-1) ?? "", /Thinking levels: off, minimal, low, medium, high, xhigh, max/);
 
 	ctx.model.thinkingLevelMap = {
 		off: null,
@@ -1698,7 +1620,7 @@ test("reports effective reasoning levels from Pi's sparse model map", async () =
 		max: "max",
 	};
 	await commands.status.handler("", ctx);
-	assert.match(notifications.at(-1) ?? "", /Reasoning: supported \(low, high, max\)/);
+	assert.match(notifications.at(-1) ?? "", /Thinking levels: low, high, max/);
 });
 
 function base64Url(value: unknown): string {
@@ -1787,7 +1709,7 @@ test("reports the native OpenAI Codex status without registering a fake provider
 	const primaryResetLabel = `${primaryReset.getFullYear()}-${pad(primaryReset.getMonth() + 1)}-${pad(primaryReset.getDate())} ${pad(primaryReset.getHours())}:${pad(primaryReset.getMinutes())}`;
 	assert.ok(report.includes(`5h: 82% remaining · reset at ${primaryResetLabel}`));
 	assert.doesNotMatch(report, /reset in \d/);
-	assert.match(report, /Availability: not checked/);
+	assert.match(report, /availability not checked/);
 	assert.doesNotMatch(report, /Live check scope:/);
 	assert.match(report, /Weekly: 64% remaining/);
 	const usageRequest = requests.find(({ url }) => url === "https://chatgpt.com/backend-api/wham/usage");
@@ -1797,45 +1719,19 @@ test("reports the native OpenAI Codex status without registering a fake provider
 	assert.equal(usageRequest.headers.get("authorization"), `Bearer ${token}`);
 	assert.equal(usageRequest.headers.get("chatgpt-account-id"), "account-123");
 	assert.equal(usageRequest.headers.get("originator"), "pi");
-	assert.match(report, /Preflight: passed · endpoint\/auth\/catalog/);
+	assert.match(report, /Health: preflight passed · endpoint\/auth\/catalog/);
 });
 
-test("shows quality and native field sources without replacing its price", async () => {
+test("shows native field sources without replacing its price", async () => {
 	const commands: Record<string, any> = {};
 	const registrations: string[] = [];
 	const handlers = new Map<string, Array<(event: any, context: any) => unknown>>();
-	const extension = createPiProviderRuntime(async () => providerDefinition("managed-provider"), {
-		officialPricingUrl: "https://reference.invalid/models",
-		fetch: async () =>
-			new Response(
-				JSON.stringify({
-					data: [
-						{
-							id: "openai/gpt-5",
-							pricing: { prompt: "0.000001", completion: "0.000002" },
-							benchmarks: {
-								artificial_analysis: {
-									intelligence_index: 51.2,
-									coding_index: 71.4,
-									agentic_index: 45.6,
-								},
-							},
-							context_length: 128_000,
-							top_provider: { max_completion_tokens: 32_000 },
-							architecture: { input_modalities: ["text", "image"] },
-							reasoning: { supported_efforts: ["low", "high"] },
-							supported_parameters: ["reasoning_effort"],
-						},
-					],
-				}),
-				{ status: 200 },
-			),
-	});
+	const extension = createPiProviderRuntime(async () => providerDefinition("managed-provider"));
 	await extension(createPi(commands, registrations, handlers) as any);
 	for (const handler of handlers.get("session_start") ?? []) {
 		await handler({ reason: "startup" }, { modelRegistry: { refresh: async () => undefined } });
 	}
-	await new Promise((resolve) => setImmediate(resolve));
+	await new Promise((resolve) => setTimeout(resolve, 50));
 
 	const notifications: string[] = [];
 	const ctx: any = {
@@ -1861,104 +1757,16 @@ test("shows quality and native field sources without replacing its price", async
 
 	await commands.status.handler("", ctx);
 	const report = notifications.at(-1) ?? "";
-	assert.deepEqual(registrations, ["managed-provider", "managed-provider"]);
+	assert.deepEqual(registrations, ["managed-provider"]);
 	assert.match(report, /Context: 128k · Pi native/);
 	assert.match(report, /Max output: 16k · Pi native/);
 	assert.match(report, /Input: text · Pi native/);
-	assert.match(report, /Reasoning: not supported · Pi native/);
-	assert.match(
-		report,
-		/Quality:\n {2}Status: fresh · just now\n {2}Source: Official metadata\n {2}Indices: intelligence 51.2 · coding 71.4 · agentic 45.6/,
-	);
+	assert.match(report, /Thinking levels: not supported · Pi native/);
 	assert.match(report, /Pricing: \$7 input \/ \$9 output per 1M tokens · Pi native · estimate/);
 	assert.doesNotMatch(report, /Capability reference:/);
 	assert.doesNotMatch(report, /Pricing source:/);
 	assert.equal(ctx.model.reasoning, false);
 	assert.deepEqual(ctx.model.cost, { input: 7, output: 9, cacheRead: 0, cacheWrite: 0 });
-});
-
-test("updates native quality metrics after a non-blocking metadata refresh", async () => {
-	const root = await mkdtemp(join(tmpdir(), "pi-provider-native-reference-"));
-	clearPricingCache(OPENROUTER_MODELS_URL);
-	let release: (() => void) | undefined;
-	let signalStarted: (() => void) | undefined;
-	const fetchStarted = new Promise<void>((resolve) => {
-		signalStarted = resolve;
-	});
-	const fetchFn = (async (input) => {
-		assert.equal(input.toString(), OPENROUTER_MODELS_URL);
-		signalStarted?.();
-		await new Promise<void>((resolve) => {
-			release = resolve;
-		});
-		return new Response(
-			JSON.stringify({
-				data: [
-					{
-						id: "openai/gpt-5",
-						pricing: { prompt: "0.000001", completion: "0.000002" },
-						benchmarks: {
-							artificial_analysis: { intelligence_index: 51.2 },
-						},
-						context_length: 128_000,
-					},
-				],
-			}),
-			{ status: 200 },
-		);
-	}) as typeof globalThis.fetch;
-	try {
-		const commands: Record<string, any> = {};
-		const handlers = new Map<string, Array<(event: any, context: any) => unknown>>();
-		const extension = createPiProviderRuntime(async () => providerDefinition("managed-provider"), {
-			fetch: fetchFn,
-			officialPricingCacheTtlMs: 0,
-			openRouterMetadataCachePath: join(root, "metadata.json"),
-		});
-		await extension(createPi(commands, [], handlers) as any);
-		for (const handler of handlers.get("session_start") ?? []) {
-			await handler({ reason: "startup" }, { modelRegistry: { refresh: async () => undefined } });
-		}
-
-		const notifications: string[] = [];
-		const ctx: any = {
-			model: {
-				provider: "openai-codex",
-				id: "gpt-5",
-				api: "openai-completions",
-				baseUrl: "https://native.example/v1",
-				input: ["text"],
-				contextWindow: 128_000,
-				maxTokens: 16_384,
-				reasoning: false,
-				cost: { input: 7, output: 9, cacheRead: 0, cacheWrite: 0 },
-			},
-			modelRegistry: {
-				getProvider: (provider: string) =>
-					provider === "openai-codex" ? { getModels: () => [{ id: "gpt-5" }] } : undefined,
-				getProviderAuthStatus: () => ({ configured: true, source: "native" }),
-				getApiKeyForProvider: async () => "native-key",
-			},
-			ui: { notify: (message: string) => notifications.push(message) },
-		};
-
-		await fetchStarted;
-		await commands.status.handler("", ctx);
-		assert.match(notifications.at(-1) ?? "", /Quality:\n {2}Status: unavailable · no AA\/OpenRouter metric/);
-		release?.();
-		for (let attempt = 0; attempt < 100; attempt++) {
-			await new Promise((resolve) => setTimeout(resolve, 10));
-			await commands.status.handler("", ctx);
-			if ((notifications.at(-1) ?? "").includes("Source: AA/OpenRouter")) break;
-		}
-		assert.match(
-			notifications.at(-1) ?? "",
-			/Quality:\n {2}Status: stale · just now\n {2}Source: AA\/OpenRouter\n {2}Indices: intelligence 51.2/,
-		);
-	} finally {
-		clearPricingCache(OPENROUTER_MODELS_URL);
-		await rm(root, { recursive: true, force: true });
-	}
 });
 
 test("reports native Pi catalogs and local preflight without registering a duplicate provider", async () => {
@@ -1996,8 +1804,8 @@ test("reports native Pi catalogs and local preflight without registering a dupli
 	await commands.status.handler("", ctx);
 	const report = notifications.at(-1) ?? "";
 	assert.deepEqual(registrations, ["managed-provider"]);
-	assert.match(report, /Catalog:\n {2}Status: static · Pi native\n {2}Models: 1/);
-	assert.match(report, /Preflight: native · provider\/auth\/catalog/);
+	assert.match(report, /Catalog: static · Pi native · 1 model/);
+	assert.match(report, /Health: preflight native · provider\/auth\/catalog/);
 	assert.doesNotMatch(report, /not managed by Pi Provider/);
 });
 
@@ -2042,17 +1850,13 @@ test("injects the stored credential reader and text wrapper into status reportin
 	assert.ok(wrapCalls > 0);
 });
 
-test("programmatic defaults keep the agent-dir pricing cache path", () => {
+test("programmatic defaults resolve the agent-dir path", () => {
 	const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
 	const agentDir = join(tmpdir(), "pi-provider-default-agent-");
 	process.env.PI_CODING_AGENT_DIR = agentDir;
 	try {
 		const deps = indexExports.getDefaultPiProviderDependencies();
 		assert.equal(deps.agentDir, agentDir);
-		assert.equal(
-			deps.openRouterMetadataCachePath,
-			join(agentDir, "extensions", "pi-provider", "openrouter-model-metadata.json"),
-		);
 	} finally {
 		if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
 		else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
@@ -2125,9 +1929,7 @@ test("refreshes the model catalog on /status refresh and reflects updated models
 		providers: ["dynamic-catalog-provider"],
 	});
 	const report = notifications.at(-1) ?? "";
-	assert.match(report, /Catalog:/);
-	assert.match(report, /Models: 2/);
-	assert.match(report, /Status: fresh · live/);
+	assert.match(report, /Catalog: fresh · live · 2 models/);
 });
 
 test("continues status reporting when modelRegistry.refresh throws an error", async () => {

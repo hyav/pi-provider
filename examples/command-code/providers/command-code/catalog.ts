@@ -1,44 +1,4 @@
-import * as fs from "node:fs";
-import * as path from "node:path";
-import { fileURLToPath } from "node:url";
 import type { ProviderModel, ProviderModelDraft } from "@hyav/pi-provider";
-
-let openRouterSnapshotCache: Record<string, unknown> | undefined;
-
-function getOpenRouterSnapshot(): Record<string, unknown> {
-	if (openRouterSnapshotCache !== undefined) return openRouterSnapshotCache;
-	try {
-		const currentFile = fileURLToPath(import.meta.url);
-		const baseDir = path.dirname(path.dirname(path.dirname(currentFile)));
-		const metaPath = path.join(baseDir, "openrouter-model-metadata.json");
-		if (fs.existsSync(metaPath)) {
-			const raw = fs.readFileSync(metaPath, "utf8");
-			const parsed = JSON.parse(raw);
-			if (parsed && typeof parsed.snapshot === "object") {
-				openRouterSnapshotCache = parsed.snapshot as Record<string, unknown>;
-				return openRouterSnapshotCache;
-			}
-		}
-	} catch {
-		// ignore
-	}
-	openRouterSnapshotCache = {};
-	return openRouterSnapshotCache;
-}
-
-function findOpenRouterMeta(id: string, snapshot: Record<string, unknown>): Record<string, any> | undefined {
-	const lower = id.toLowerCase().trim();
-	if (snapshot[lower] && typeof snapshot[lower] === "object") {
-		return snapshot[lower] as Record<string, any>;
-	}
-	if (lower.includes("/")) {
-		const shortId = lower.split("/")[1];
-		if (shortId && snapshot[shortId] && typeof snapshot[shortId] === "object") {
-			return snapshot[shortId] as Record<string, any>;
-		}
-	}
-	return undefined;
-}
 
 export const COMMAND_CODE_PROVIDER_ID = "command-code";
 export const COMMAND_CODE_PROVIDER_NAME = "Command Code";
@@ -859,7 +819,7 @@ export function getCommandCodeHeaders(): Record<string, string> | undefined {
  * Resolves a model draft using the 3-level strategy:
  * 1. Live endpoint data (id, name, context_length)
  * 2. Static official definition (capabilities, reasoning, pricing)
- * 3. OpenRouter metadata fallback (pricing, quality, capabilities)
+ * 3. Raw draft fallback allowing Pi catalog fallback completion
  */
 export function resolveModelDraft(liveModel: {
 	id: string;
@@ -877,15 +837,16 @@ export function resolveModelDraft(liveModel: {
 	const name = isSafeText(liveModel.name) ? liveModel.name.trim() : (staticDef?.name ?? id);
 	const contextWindow = isPositiveInteger(liveModel.context_length)
 		? liveModel.context_length
-		: (staticDef?.contextWindow ?? 128_000);
+		: staticDef?.contextWindow;
 
 	if (staticDef) {
 		// Tier 2: Static official definition
-		const maxTokens = Math.min(staticDef.maxTokens ?? SAFE_MAX_OUTPUT_TOKENS, contextWindow);
+		const effectiveContextWindow = contextWindow ?? 128_000;
+		const maxTokens = Math.min(staticDef.maxTokens ?? SAFE_MAX_OUTPUT_TOKENS, effectiveContextWindow);
 		return {
 			id,
 			name,
-			contextWindow,
+			contextWindow: effectiveContextWindow,
 			maxTokens,
 			cost: { ...staticDef.cost },
 			pricingSource: "provider",
@@ -904,56 +865,11 @@ export function resolveModelDraft(liveModel: {
 		};
 	}
 
-	// Tier 3: OpenRouter metadata fallback
-	const snapshot = getOpenRouterSnapshot();
-	const openRouterMeta = findOpenRouterMeta(id, snapshot);
-
-	if (openRouterMeta && isRecord(openRouterMeta.cost)) {
-		const maxTokens = Math.min(
-			typeof openRouterMeta.maxTokens === "number" ? openRouterMeta.maxTokens : SAFE_MAX_OUTPUT_TOKENS,
-			contextWindow,
-		);
-		const inputModalities = Array.isArray(openRouterMeta.input) ? openRouterMeta.input : ["text"];
-		return {
-			id,
-			name: typeof openRouterMeta.name === "string" ? openRouterMeta.name : name,
-			contextWindow: typeof openRouterMeta.contextWindow === "number" ? openRouterMeta.contextWindow : contextWindow,
-			maxTokens,
-			cost: {
-				input: typeof openRouterMeta.cost.input === "number" ? openRouterMeta.cost.input : 0,
-				output: typeof openRouterMeta.cost.output === "number" ? openRouterMeta.cost.output : 0,
-				cacheRead: typeof openRouterMeta.cost.cacheRead === "number" ? openRouterMeta.cost.cacheRead : 0,
-				cacheWrite: typeof openRouterMeta.cost.cacheWrite === "number" ? openRouterMeta.cost.cacheWrite : 0,
-			},
-			pricingSource: "fallback",
-			input: inputModalities.filter((item): item is "text" | "image" => item === "text" || item === "image"),
-			reasoning: Boolean(openRouterMeta.reasoning),
-			...(openRouterMeta.thinkingLevelMap && isRecord(openRouterMeta.thinkingLevelMap)
-				? { thinkingLevelMap: openRouterMeta.thinkingLevelMap as any }
-				: {}),
-			compat: {
-				...routing.compat,
-				...(isRecord(openRouterMeta.compat) && openRouterMeta.compat.supportsReasoningEffort
-					? { supportsReasoningEffort: true }
-					: {}),
-			},
-			...(routing.api !== "openai-completions" ? { api: routing.api } : {}),
-			...(routing.baseUrl !== COMMAND_CODE_BASE_URL ? { baseUrl: routing.baseUrl } : {}),
-			...(headers ? { headers } : {}),
-		};
-	}
-
-	// Safe fallback defaults for unvetted models
-	const maxTokens = Math.min(SAFE_MAX_OUTPUT_TOKENS, contextWindow);
+	// Tier 3: Raw draft for unvetted models - allow Pi catalog fallback to enrich capabilities
 	return {
 		id,
 		name,
-		contextWindow,
-		maxTokens,
-		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-		pricingSource: "fallback",
-		input: ["text"],
-		reasoning: false,
+		...(contextWindow !== undefined ? { contextWindow } : {}),
 		compat: { ...routing.compat },
 		...(routing.api !== "openai-completions" ? { api: routing.api } : {}),
 		...(routing.baseUrl !== COMMAND_CODE_BASE_URL ? { baseUrl: routing.baseUrl } : {}),

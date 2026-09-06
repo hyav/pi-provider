@@ -9,10 +9,11 @@ import type {
 import {
 	createModelCatalogLifecycle,
 	defineProviderExtension,
+	isLegacyNormalizedSnapshot,
 	isProviderDataError,
 	MAX_PROVIDER_MODEL_COUNT,
-	normalizeProviderModels,
 	ProviderDataError,
+	validateProviderModelDrafts,
 	withDeadline,
 } from "@hyav/pi-provider";
 import { HYPER_BASE_URL, HYPER_USER_AGENT, hyperJsonHeaders } from "./charm-hyper/constants.ts";
@@ -308,7 +309,7 @@ async function discoverHyperModels(
 			if (parsed.models.length === 0) {
 				throw new ProviderDataError("Charm Hyper model discovery returned no valid models", "badjson");
 			}
-			normalizeProviderModels(parsed.models);
+			validateProviderModelDrafts(parsed.models);
 			return parsed;
 		},
 		timeoutMs,
@@ -330,15 +331,18 @@ function catalogErrorCode(error: unknown): string {
 }
 
 type HyperModelsStoreEntry = ProviderRefreshContext["stored"];
-type HyperStoredModel = NonNullable<HyperModelsStoreEntry>["models"][number] & {
-	pricingSource?: ProviderModelDraft["pricingSource"];
+type HyperStoredModel = ProviderModelDraft & {
+	provider: string;
+	baseUrl: string;
+	api: ProviderModelDraft["api"];
 };
 
 function draftsFromStoredModels(entry: HyperModelsStoreEntry): ProviderModelDraft[] | undefined {
 	if (!entry || !Array.isArray(entry.models) || entry.models.length === 0) return undefined;
+	if (isLegacyNormalizedSnapshot(entry.models)) return undefined;
 	try {
 		const drafts: ProviderModelDraft[] = entry.models.map(({ provider: _provider, ...model }) => model);
-		normalizeProviderModels(drafts);
+		validateProviderModelDrafts(drafts);
 		return drafts;
 	} catch {
 		return undefined;
@@ -346,10 +350,12 @@ function draftsFromStoredModels(entry: HyperModelsStoreEntry): ProviderModelDraf
 }
 
 function storedModelsFromDrafts(models: ProviderModelDraft[]): HyperStoredModel[] {
-	return normalizeProviderModels(models).map((model) => {
-		const source = models.find(({ id }) => id === model.id)?.pricingSource;
+	validateProviderModelDrafts(models);
+	return models.map((model) => {
+		const source = model.pricingSource;
 		return {
 			...model,
+			name: typeof model.name === "string" && model.name.trim() !== "" ? model.name.trim() : model.id,
 			...(source ? { pricingSource: source } : {}),
 			api: model.api ?? "openai-completions",
 			provider: "charm-hyper",
@@ -362,14 +368,19 @@ export function createCharmHyperAdapter(
 	fetchFn: typeof globalThis.fetch,
 	discoveryTimeoutMs: number,
 	now: () => number = Date.now,
+	initialModels?: ProviderModelDraft[],
 ): ProviderAdapter {
 	let provider: ProviderAdapter["provider"];
 	const lifecycle = createModelCatalogLifecycle({
+		initialModels,
 		ttlMs: HYPER_MODEL_CATALOG_TTL_MS,
 		now,
 		discover: (context) => discoverHyperModels(fetchFn, discoveryTimeoutMs, context.signal),
 		restore: draftsFromStoredModels,
-		persist: (models, checkedAt) => ({ models: storedModelsFromDrafts(models), checkedAt }),
+		persist: (models, checkedAt) => ({
+			models: storedModelsFromDrafts(models) as unknown as NonNullable<HyperModelsStoreEntry>["models"],
+			checkedAt,
+		}),
 		onUpdate: (models) => {
 			if (provider) provider.models = models;
 		},
@@ -387,7 +398,7 @@ export function createCharmHyperAdapter(
 		oauth: createCharmHyperOAuth(fetchFn, now),
 	};
 
-	return { id: "charm-hyper", catalog: lifecycle.catalog, provider };
+	return { id: "charm-hyper", catalog: lifecycle.catalog, lifecycle, provider };
 }
 
 const charmHyperProviderExtension = defineProviderExtension({

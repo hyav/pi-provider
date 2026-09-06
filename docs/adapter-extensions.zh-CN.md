@@ -95,7 +95,43 @@ export default defineProviderExtension({
 
 动态 Provider Adapter 可以使用公开的 `createModelCatalogLifecycle()` helper 处理快照恢复、TTL、受 generation guard 保护的发布、持久化失败降级、在线目录完整替换，以及刷新失败时保留最近一次成功目录。Adapter 仍负责端点鉴权、响应解析与校验、缓存模型转换、错误码映射，并通过 `onUpdate` 将模型赋给 Provider 定义。`initialModels` 表示显式静态兜底；省略时初始来源为 `"empty"`。恢复的快照标记为 `"cached"`，成功发布的在线目录标记为 `"live"`。即使调用者使用不同 signal，同一 Provider 的所有并发调用也最多共享一个目录发现请求。取消单个调用者只停止该调用者的等待，不会取消有界的共享请求或影响其他调用者。受 generation guard 保护的发布尝试会串行执行，因此旧调用者被拒绝后，较新的有效调用者仍可发布结果。成功目录 TTL 与失败重试计时相互独立：失败默认从 30 秒开始指数退避，最高 15 分钟，可通过 `failureBackoffMs` 和 `maxFailureBackoffMs` 调整；`force` 会同时绕过 TTL 与失败退避。目录诊断会公开最近成功刷新、最近尝试、连续失败次数和下次重试时间。Discovery 函数既可返回模型数组，也可返回 `{ models, diagnostics }`；诊断只支持非负安全整数 `rejectedCount` 和 `duplicateCount`。这些计数只随通过 generation guard 的目录一起发布，绝不包含被拒绝的 ID、payload 片段或响应正文。
 
-OpenRouter 补全通过 `fetchOfficialModelMetadata()` 和 `applyOfficialModelMetadata()` 以模型元数据 API 形式公开。它只为 Provider 已提供的模型补齐缺失的价格、能力、身份和质量字段，绝不会创建 Provider 模型。旧的 `fetchOfficialPricing()` 和 `applyOfficialModelCosts()` 名称继续作为 deprecated 兼容包装保留，参数、缓存文件和结果均不变。注册后的模型诊断会记录价格、上下文窗口、最大输出、输入模式、推理支持和 thinking level map 的字段级来源。`fieldSources` 在字段被注册归一化改写时使用 `"normalized"`，例如空输入列表变为 `["text"]`、最大输出被限制为上下文窗口，或部分价格被缺失 SKU 的零值补全。`fieldSources.cost` 表示归一化模型字段来自何处；`pricing.source` 仍是价格是否已知、基价、调整和有效价格的权威依据。`reasoning` 与 `thinkingLevelMap` 分开记录，因为 Provider 可以声明支持推理，而可用等级由 OpenRouter 补齐。
+### 公共 Façade API（`@hyav/pi-provider`）
+
+经 Jiti loader 加载的能力文件将 `@hyav/pi-provider` 解析到 `core/public-adapters.ts`。该入口暴露内置和用户 Adapter 所需的全部运行时函数与 TypeScript 类型，同时不泄露 Host-only 内部 API（例如 `createPiProviderHost` 或 `loadPiCatalog`）：
+
+- **扩展定义 Factory**：`defineProviderExtension`、`defineStatusExtension`、`definePreflightExtension`、`defineTunerExtension`
+- **模型校验与边界**：`MAX_PROVIDER_MODEL_COUNT`、`validateProviderModelDrafts`、`normalizeProviderModels`
+- **目录生命周期**：`createModelCatalogLifecycle`
+- **Preflight 与 Status 工具**：`createCatalogPreflightAdapter`、`createOpenCodeCatalogPreflightAdapter`、`parseRetryAfter`
+- **HTTP、超时与错误**：`withDeadline`、`appendBaseUrlPath`、`authDefinesHeader`、`getContextAuth`、`hasBaseUrlOrigin`、`mergeDiagnosticHeaders`、`isProviderDataError`、`ProviderDataError`
+- **旧版快照迁移**：`isLegacyNormalizedModel`、`isLegacyNormalizedSnapshot`
+- **公共类型**：`AdapterExtensionContext`、`ProviderExtensionDefinition`、`StatusExtensionDefinition`、`PreflightExtensionDefinition`、`TunerExtensionDefinition`、`ModelCatalogDiagnostics`、`ModelCatalogDiscoveryResult`、`ModelCatalogLifecycle`、`ModelCatalogLifecycleOptions`、`ModelCatalogSource`、`ModelCatalogStatus`、`PreflightAdapter`、`PreflightContextLike`、`PreflightModel`、`PreflightSnapshot`、`StatusContextLike`、`ActiveModel`、`ProviderAdapter`、`ProviderCost`、`ProviderModel`、`ProviderModelDraft`、`ProviderPricingAdjustment`、`ProviderPricingPolicy`、`ProviderPricingSource`、`ProviderRefreshContext`、`ProviderRequestAuth`、`StatusAdapter`、`StatusContext`、`StatusEntry`、`StatusSnapshot`、`StoredCredentialLike`、`ThinkingLevel`、`TunerAdapter`、`TunerContext`
+
+### 模型能力与元数据优先级
+
+模型元数据遵循严格的三级优先级机制：
+
+1. **Provider 端点显式字段（最高优先级）**：从 Provider 接口响应中显式解析出的属性（如 `contextWindow`、`maxTokens`、`cost`、`input`、`reasoning`、`thinkingLevelMap` 及 `compat`）优先保留。显式 `false`（`reasoning: false`）、显式零价格（`cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }`）以及显式单模态（`input: ["text"]`）均被视为 Provider 的明确声明，绝不会被后续层级覆盖。
+2. **Pi Catalog 回退补全**：若 raw `ProviderModelDraft` 中未声明某些字段（值为 `undefined`），Pi catalog fallback 会在原厂列表（Anthropic、OpenAI、Google、DeepSeek、Mistral、xAI、MiniMax、Moonshot/Kimi、ZAI、Xiaomi、Ant-Ling）中按确定性规则检索同名模型，仅补齐缺失的价格、上下文窗口、推理开关、思维层级映射和输入模态。存在命名歧义或多候选项时拒绝匹配。该回退只补充 Provider 已列出的模型，绝不会凭空创建新模型。
+3. **默认归一化兜底（最低优先级）**：若 Provider 端点与 Pi catalog 均未提供某项能力，系统将填充最后的安全兜底值（`contextWindow: 128_000`、`maxTokens: 16_384`、`cost: 0`、`reasoning: false`、`input: ["text"]`）。
+
+### 原始草稿与缓存边界
+
+动态 Provider Adapter 在持久化或缓存发现的模型时（例如存入 Pi 的 `models-store.json` 或本地快照文件），**必须持久化原始模型草稿（Raw Model Drafts，如 `{ id, name, api, baseUrl, provider }`）**，绝不能持久化注入了默认保底值的归一化模型（如 `contextWindow: 128000`、`maxTokens: 16384`、`cost: 0`、`reasoning: false`）。
+
+若持久化了归一化默认值，在下一次会话恢复或离线加载时，这些字段会被视作 Provider 显式声明的真实能力，从而永久屏蔽 Pi catalog 原厂能力回退。
+
+使用 `isLegacyNormalizedSnapshot()` 可识别此前版本序列化的旧版归一化快照；恢复时检测到旧快照应主动使其失效（返回 `undefined`），促使执行在线发现以重新获取原始草稿并享受原厂元数据补全。
+
+### 凭据与路由安全边界
+
+- **凭据隔离**：Adapter 声明凭据必须通过环境变量引用（`$NAME` 或 `${NAME}`）或 OAuth 配置；诊断路径、状态快照及日志严禁打印或序列化原始 API Key、Bearer Token 等敏感凭据。
+- **端点路由限定**：请求必须严格限制在当前 Provider 预期的目标 origin 与 baseUrl 之内；状态探测与预检检查禁止向非预期或未映射的主机转发凭据。
+
+状态诊断支持：
+- `/status`：离线查看缓存诊断、紧凑单行（Catalog、Health、Account）、合并 Thinking levels 与字段级来源诊断；
+- `/status refresh`：免费刷新模型目录、健康状态与账户信息；
+- `/status check`：发送真实探针请求验证端到端可用性（可能产生模型调用费用）。
 
 其他目录分别使用 `defineStatusExtension`、`definePreflightExtension` 和 `defineTunerExtension`。身份元数据必须静态提供：
 

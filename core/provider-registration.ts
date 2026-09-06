@@ -1,6 +1,6 @@
 import type { ProviderConfig } from "@earendil-works/pi-coding-agent";
 import { validateProviderModelDrafts } from "./adapter-validation.ts";
-import { applyOfficialModelMetadata, findOfficialMeta, type OfficialModelMeta } from "./official-pricing.ts";
+import { mergeModelWithPiCatalog, type PiCatalogSnapshot, toPiCatalogSnapshot } from "./pi-model-metadata.ts";
 import { resolvePricingDetails } from "./pricing-adjustments.ts";
 import type { PiProviderDependencies } from "./runtime-config.ts";
 import type {
@@ -99,13 +99,6 @@ export function normalizeProviderModels(models: ProviderModelDraft[]): ProviderM
 	});
 }
 
-function cloneQuality(quality: NonNullable<OfficialModelMeta["quality"]>): NonNullable<OfficialModelMeta["quality"]> {
-	return quality.map((score) => ({
-		...score,
-		...(score.confidenceInterval ? { confidenceInterval: { ...score.confidenceInterval } } : {}),
-	}));
-}
-
 function selectPricingAdjustment(
 	adapter: ProviderAdapter,
 	model: ProviderModelDraft,
@@ -147,81 +140,71 @@ function inputsEqual(left: ProviderModelDraft["input"], right: ProviderModel["in
 	return Array.isArray(left) && left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
-function getDraftCostSource(
-	draft: ProviderModelDraft | undefined,
-	officialMeta: OfficialModelMeta | undefined,
-	normalizedCost: ProviderCost,
-): ProviderPricingSource | "default" | "normalized" {
-	const candidate = draft?.cost ?? (officialMeta?.costKnown !== false ? officialMeta?.cost : undefined);
-	if (candidate === undefined) return "default";
-	if (!costsEqual(candidate, normalizedCost)) return "normalized";
-	return draft?.cost !== undefined ? (draft.pricingSource ?? "provider") : "official";
-}
-
-function getFieldSource(
-	providerValue: unknown,
-	officialValue: unknown,
-	wasNormalized: boolean,
-): "provider" | "official" | "default" | "normalized" {
-	if (providerValue === undefined && officialValue === undefined) return "default";
-	if (wasNormalized) return "normalized";
-	return providerValue !== undefined ? "provider" : "official";
-}
-
 function resolveModelRegistration(
 	adapter: ProviderAdapter,
 	runtime: PiProviderDependencies,
 	modelDrafts: ProviderModelDraft[],
-	officialPricing: Record<string, OfficialModelMeta>,
+	catalogSnapshot?: PiCatalogSnapshot | Record<string, unknown>,
 ): { models: ProviderModel[]; modelMetadata: Record<string, ProviderModelMetadata> } {
 	validateProviderModelDrafts(modelDrafts, `Provider ${adapter.id}`);
-	const enrichedDrafts = applyOfficialModelMetadata(modelDrafts, officialPricing);
+	const catalog = toPiCatalogSnapshot(catalogSnapshot);
 	const pricingPolicy = runtime.pricingPolicies?.[adapter.id] ?? adapter.pricing;
 	const metadata: Record<string, ProviderModelMetadata> = {};
-	const adjustedDrafts = enrichedDrafts.map((model, index) => {
-		const modelId = model.id.trim();
-		const originalDraft = modelDrafts[index];
-		const officialMeta = findOfficialMeta(modelId, officialPricing);
-		const normalizedModel = normalizeProviderModel(model);
-		const normalizedCost = normalizeCost(model.cost);
-		const fieldSources = {
-			cost: getDraftCostSource(originalDraft, officialMeta, normalizedCost),
-			contextWindow: getFieldSource(
-				originalDraft?.contextWindow,
-				officialMeta?.contextWindow,
-				model.contextWindow !== undefined && model.contextWindow !== normalizedModel.contextWindow,
-			),
-			maxTokens: getFieldSource(
-				originalDraft?.maxTokens,
-				officialMeta?.maxTokens,
-				model.maxTokens !== undefined && model.maxTokens !== normalizedModel.maxTokens,
-			),
-			input: getFieldSource(
-				originalDraft?.input,
-				officialMeta?.input,
-				model.input !== undefined && !inputsEqual(model.input, normalizedModel.input),
-			),
-			reasoning: getFieldSource(
-				originalDraft?.reasoning,
-				officialMeta?.reasoning,
-				model.reasoning !== undefined && model.reasoning !== normalizedModel.reasoning,
-			),
-			thinkingLevelMap: getFieldSource(originalDraft?.thinkingLevelMap, officialMeta?.thinkingLevelMap, false),
-		};
+	const adjustedDrafts = modelDrafts.map((originalDraft) => {
+		const modelId = originalDraft.id.trim();
+		const useFallback = adapter.usePiModelMetaFallback ?? true;
+		const merged = mergeModelWithPiCatalog(originalDraft, catalog, {
+			useFallback,
+			currentProviderId: adapter.id,
+		});
+		const mergedDraft = merged.draft;
+		const fieldSources = { ...merged.fieldSources };
+
+		const normalizedModel = normalizeProviderModel(mergedDraft);
+		const normalizedCost = normalizeCost(mergedDraft.cost);
+
+		if (mergedDraft.contextWindow !== undefined && mergedDraft.contextWindow !== normalizedModel.contextWindow) {
+			fieldSources.contextWindow = "normalized";
+		}
+		if (mergedDraft.maxTokens !== undefined && mergedDraft.maxTokens !== normalizedModel.maxTokens) {
+			fieldSources.maxTokens = "normalized";
+		}
+		if (mergedDraft.input !== undefined && !inputsEqual(mergedDraft.input, normalizedModel.input)) {
+			fieldSources.input = "normalized";
+		}
+		if (mergedDraft.reasoning !== undefined && mergedDraft.reasoning !== normalizedModel.reasoning) {
+			fieldSources.reasoning = "normalized";
+		}
+		if (mergedDraft.cost !== undefined && !costsEqual(mergedDraft.cost, normalizedCost)) {
+			fieldSources.cost = "normalized";
+		}
+
 		const source: ProviderPricingSource | "none" =
-			model.cost === undefined ? "none" : (model.pricingSource ?? "provider");
+			mergedDraft.cost === undefined
+				? "none"
+				: (mergedDraft.pricingSource ??
+					(fieldSources.cost === "mixed"
+						? "mixed"
+						: fieldSources.cost === "pi"
+							? "pi"
+							: fieldSources.cost === "provider"
+								? "provider"
+								: (originalDraft.pricingSource ?? "provider")));
+
 		const pricing = resolvePricingDetails(
-			model.cost === undefined ? undefined : normalizedCost,
+			mergedDraft.cost === undefined ? undefined : normalizedCost,
 			source,
-			selectPricingAdjustment(adapter, model, pricingPolicy),
+			selectPricingAdjustment(adapter, mergedDraft, pricingPolicy),
 		);
+		if (fieldSources.costBySku) {
+			pricing.costBySku = fieldSources.costBySku;
+		}
 		metadata[modelId] = {
 			pricing,
 			fieldSources,
-			...(officialMeta?.quality ? { quality: cloneQuality(officialMeta.quality) } : {}),
 		};
 		return {
-			...model,
+			...mergedDraft,
 			...(pricing.effectiveCost ? { cost: pricing.effectiveCost } : {}),
 		};
 	});
@@ -286,7 +269,6 @@ function getRegistrationState(adapter: ProviderAdapter): NonNullable<ProviderAda
 	if (!registration) return undefined;
 	registration.normalizedModels ??= [];
 	registration.modelMetadata ??= {};
-	registration.officialPricing ??= {};
 	registration.activeRefreshes ??= 0;
 	return registration;
 }
@@ -321,7 +303,7 @@ function shouldOmitOptionalApiKey(adapter: ProviderAdapter, runtime: PiProviderD
 export function prepareProviderRegistration(
 	adapter: ProviderAdapter,
 	runtime: PiProviderDependencies,
-	officialPricing: Record<string, OfficialModelMeta> = {},
+	catalogSnapshot?: PiCatalogSnapshot | Record<string, unknown>,
 	modelDrafts?: ProviderModelDraft[],
 ): ProviderConfig {
 	const drafts =
@@ -329,18 +311,24 @@ export function prepareProviderRegistration(
 		(adapter.registration?.normalizedModels === adapter.provider.models
 			? adapter.registration.modelDrafts
 			: adapter.provider.models);
-	const resolved = resolveModelRegistration(adapter, runtime, drafts, officialPricing);
+	const lifecycle = adapter.lifecycle ?? (adapter.provider.refreshModels as any)?.lifecycle;
+	if (lifecycle && drafts && drafts.length > 0) {
+		lifecycle.setModels(drafts, adapter.catalog?.source, adapter.catalog?.updatedAt);
+	}
+	const catalog = toPiCatalogSnapshot(catalogSnapshot);
+	const resolved = resolveModelRegistration(adapter, runtime, drafts, catalog);
 	const existingRegistration = getRegistrationState(adapter);
 	const registration: NonNullable<ProviderAdapter["registration"]> = existingRegistration ?? {
 		modelDrafts: drafts,
 		normalizedModels: [],
 		modelMetadata: {},
-		officialPricing,
+		piCatalog: catalog,
 		activeRefreshes: 0,
 	};
 	registration.modelDrafts = drafts;
 	registration.modelMetadata = resolved.modelMetadata;
-	registration.officialPricing = officialPricing;
+	registration.piCatalog = catalog;
+	registration.officialPricing = catalogSnapshot as any;
 	const models = replaceModels(registration.normalizedModels, resolved.models);
 	const adapterOwnsCatalog = adapter.catalog !== undefined;
 	adapter.registration = registration;
@@ -365,7 +353,12 @@ export function prepareProviderRegistration(
 			registration.activeRefreshes++;
 			try {
 				const refreshedModels = await originalRefresh(options);
-				const resolved = resolveModelRegistration(adapter, runtime, refreshedModels, registration.officialPricing);
+				const resolved = resolveModelRegistration(
+					adapter,
+					runtime,
+					refreshedModels,
+					registration.piCatalog ?? registration.officialPricing,
+				);
 				const normalizedModels = replaceModels(registration.normalizedModels, resolved.models);
 				registration.modelDrafts = refreshedModels;
 				registration.modelMetadata = resolved.modelMetadata;
@@ -410,18 +403,22 @@ export function refreshProviderRegistrations(
 	pi: ProviderRegistrationApi,
 	providers: readonly ProviderAdapter[],
 	runtime: PiProviderDependencies,
-	officialPricing: Record<string, OfficialModelMeta>,
+	catalogSnapshot?: PiCatalogSnapshot | Record<string, unknown>,
 	providerDrafts?: ReadonlyMap<ProviderAdapter, ProviderModelDraft[]>,
 ): void {
+	const catalog = toPiCatalogSnapshot(catalogSnapshot);
 	for (const adapter of providers) {
 		const registration = getRegistrationState(adapter);
-		if (registration) registration.officialPricing = officialPricing;
+		if (registration) {
+			registration.piCatalog = catalog;
+			registration.officialPricing = catalogSnapshot as any;
+		}
 		if (registration && registration.activeRefreshes > 0) {
 			registration.deferredRegistration = () =>
-				registerProviderAdapter(pi, adapter, runtime, officialPricing, providerDrafts?.get(adapter));
+				registerProviderAdapter(pi, adapter, runtime, catalogSnapshot, providerDrafts?.get(adapter));
 			continue;
 		}
-		registerProviderAdapter(pi, adapter, runtime, officialPricing, providerDrafts?.get(adapter));
+		registerProviderAdapter(pi, adapter, runtime, catalogSnapshot, providerDrafts?.get(adapter));
 	}
 }
 
@@ -429,10 +426,10 @@ export function registerProviderAdapter(
 	pi: ProviderRegistrationApi,
 	adapter: ProviderAdapter,
 	runtime: PiProviderDependencies,
-	officialPricing: Record<string, OfficialModelMeta> = {},
+	catalogSnapshot?: PiCatalogSnapshot | Record<string, unknown>,
 	modelDrafts?: ProviderModelDraft[],
 ): ProviderConfig {
-	const registeredProvider = prepareProviderRegistration(adapter, runtime, officialPricing, modelDrafts);
+	const registeredProvider = prepareProviderRegistration(adapter, runtime, catalogSnapshot, modelDrafts);
 	// Pi merges re-registrations, so omission alone cannot clear a raw API key
 	// left by the previous extension instance during /reload.
 	if (registeredProvider.apiKey === undefined) pi.unregisterProvider?.(adapter.id);

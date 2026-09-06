@@ -11,7 +11,7 @@ A provider extension toolkit for [Pi](https://pi.dev). It registers LLM provider
 - One Pi Provider Host for registration, status, preflight checks, live checks, and request tuners
 - Provider, status, preflight, and tuner Adapter files discovered by one Pi entrypoint on `/reload`
 - Resilient model catalogs with cached online snapshots, bounded background refresh, and failure retention
-- Provider-first pricing metadata with optional OpenRouter completion and quality indicators
+- Provider-first metadata completed by Pi native manufacturer catalog, with deterministic field-level provenance
 - Explicit diagnostics: cached `/status`, free `/status refresh`, and potentially billable `/status check`
 - Built-in integrations for Charm Hyper, DeepSeek, Google Gemini, OpenAI Codex, OpenCode Zen, and OpenCode Go
 - Status/preflight adapters for the native Pi providers Anthropic, GitHub Copilot, OpenRouter, Groq, and xAI
@@ -53,9 +53,9 @@ A dynamic Provider whose API key references environment variables keeps its last
 |---|---:|---|---|
 | `HYPER_API_KEY` | For Charm Hyper API-key auth | None | Supplies the built-in `charm-hyper` provider credential; OAuth users may use `/login` |
 | `ANTHROPIC_USAGE_URL` | No | `https://claude.ai/api/usage` | Custom Anthropic usage endpoint; default endpoint is subscription OAuth only |
-| `PI_CODING_AGENT_DIR` | No | `~/.pi/agent` | Changes Pi's agent directory; public OpenRouter metadata is cached under `<agent-dir>/extensions/pi-provider/` |
+| `PI_CODING_AGENT_DIR` | No | `~/.pi/agent` | Changes Pi's agent directory |
 
-Programmatic integrations can configure pricing fallback, pricing policies, request timeouts, metadata URLs, and cache paths through `createPiProviderRuntime()` or `createPiProviderHost()`. Programmatic defaults resolve the agent directory from `PI_CODING_AGENT_DIR` (falling back to `~/.pi/agent`) and keep the OpenRouter metadata cache on disk under `<agent-dir>/extensions/pi-provider/`, matching the table above; the Pi entrypoint overrides it with Pi's own resolution. Host packages with a custom capability root can call `createPiProviderExtension({ adapterRoot, dependencies })`. The source definition [`PiProviderDependencies`](core/runtime-config.ts) is authoritative.
+Programmatic integrations can configure pricing policies, request timeouts, and provider options through `createPiProviderRuntime()` or `createPiProviderHost()`. Programmatic defaults resolve the agent directory from `PI_CODING_AGENT_DIR` (falling back to `~/.pi/agent`); the Pi entrypoint overrides it with Pi's own resolution. Host packages with a custom capability root can call `createPiProviderExtension({ adapterRoot, dependencies })`. The source definition [`PiProviderDependencies`](core/runtime-config.ts) is authoritative.
 
 ## Adapter discovery (file-level plug and play)
 
@@ -82,7 +82,7 @@ Adapter files must not runtime-import Pi's bundled packages (`@earendil-works/pi
 
 ## Before you use it
 
-`/status` is offline, `/status refresh` performs free remote checks, and `/status check` sends a live model request that may consume quota. Configured credentials are sent only to the corresponding provider endpoints and are omitted from status output.
+`/status` is offline, `/status refresh` performs free remote checks and updates catalog caches, and `/status check` sends a live model request that may consume quota. Configured credentials are sent only to the corresponding provider endpoints and are omitted from status output.
 
 ## License
 

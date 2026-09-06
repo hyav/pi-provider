@@ -136,7 +136,7 @@ test("keeps a Provider fallback as the effective base price", () => {
 	assert.equal(adapter.registration?.modelMetadata?.["model-alpha"]?.pricing.source, "fallback");
 });
 
-test("attaches quality metadata without replacing provider pricing", () => {
+test("preserves provider pricing without being overridden by Pi catalog reference", () => {
 	const adapter = providerAdapter();
 	adapter.pricing = undefined;
 	adapter.provider.models = [
@@ -149,15 +149,6 @@ test("attaches quality metadata without replacing provider pricing", () => {
 	const registered = prepareProviderRegistration(adapter, getDefaultPiProviderDependencies(), {
 		"model-alpha": {
 			cost: { input: 5, output: 30, cacheRead: 0.5, cacheWrite: 6.25 },
-			quality: [
-				{
-					source: "artificial-analysis",
-					benchmark: "Artificial Analysis",
-					category: "intelligence",
-					metric: "score",
-					value: 51.2,
-				},
-			],
 		},
 	});
 
@@ -167,15 +158,7 @@ test("attaches quality metadata without replacing provider pricing", () => {
 		cacheRead: 0.9,
 		cacheWrite: 2,
 	});
-	assert.deepEqual(adapter.registration?.modelMetadata?.["model-alpha"]?.quality, [
-		{
-			source: "artificial-analysis",
-			benchmark: "Artificial Analysis",
-			category: "intelligence",
-			metric: "score",
-			value: 51.2,
-		},
-	]);
+	assert.equal(adapter.registration?.modelMetadata?.["model-alpha"]?.pricing.source, "provider");
 });
 
 test("records the source of each registered model field", () => {
@@ -200,12 +183,18 @@ test("records the source of each registered model field", () => {
 	});
 
 	assert.deepEqual(adapter.registration?.modelMetadata?.["model-alpha"]?.fieldSources, {
-		cost: "official",
+		cost: "pi",
 		contextWindow: "provider",
-		maxTokens: "official",
+		maxTokens: "pi",
 		input: "provider",
 		reasoning: "provider",
 		thinkingLevelMap: "default",
+		costBySku: {
+			input: "pi",
+			output: "pi",
+			cacheRead: "pi",
+			cacheWrite: "pi",
+		},
 	});
 });
 
@@ -219,14 +208,14 @@ test("records cost and thinking-map sources without overriding Provider fields",
 			pricingSource: "fallback",
 			thinkingLevelMap: { high: "provider-high" },
 		},
-		{ id: "official-model" },
+		{ id: "pi-model" },
 	];
 	prepareProviderRegistration(adapter, getDefaultPiProviderDependencies(), {
 		"provider-model": {
 			cost: { input: 5, output: 30, cacheRead: 0.5, cacheWrite: 6.25 },
-			thinkingLevelMap: { high: "official-high" },
+			thinkingLevelMap: { high: "pi-high" },
 		},
-		"official-model": {
+		"pi-model": {
 			cost: { input: 3, output: 9, cacheRead: 0, cacheWrite: 0 },
 			thinkingLevelMap: { low: "low", high: "high" },
 		},
@@ -236,9 +225,9 @@ test("records cost and thinking-map sources without overriding Provider fields",
 	assert.equal(adapter.registration?.modelMetadata?.["provider-model"]?.fieldSources?.thinkingLevelMap, "provider");
 	assert.equal(adapter.registration?.modelMetadata?.["provider-model"]?.pricing.source, "fallback");
 	assert.deepEqual(adapter.registration?.modelDrafts[0]?.thinkingLevelMap, { high: "provider-high" });
-	assert.equal(adapter.registration?.modelMetadata?.["official-model"]?.fieldSources?.cost, "official");
-	assert.equal(adapter.registration?.modelMetadata?.["official-model"]?.fieldSources?.thinkingLevelMap, "official");
-	assert.equal(adapter.registration?.modelMetadata?.["official-model"]?.pricing.source, "official");
+	assert.equal(adapter.registration?.modelMetadata?.["pi-model"]?.fieldSources?.cost, "pi");
+	assert.equal(adapter.registration?.modelMetadata?.["pi-model"]?.fieldSources?.thinkingLevelMap, "pi");
+	assert.equal(adapter.registration?.modelMetadata?.["pi-model"]?.pricing.source, "pi");
 });
 
 test("records default sources when cost and thinking metadata are unavailable", () => {
@@ -313,6 +302,12 @@ test("preserves an explicit Provider zero price", () => {
 		source: "provider",
 		baseCost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 		effectiveCost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+		costBySku: {
+			input: "provider",
+			output: "provider",
+			cacheRead: "provider",
+			cacheWrite: "provider",
+		},
 	});
 	assert.equal(adapter.registration?.modelMetadata?.["model-alpha"]?.fieldSources?.cost, "provider");
 });
@@ -348,15 +343,6 @@ test("refreshes the pricing sidecar when a dynamic catalog changes", async () =>
 	const registered = prepareProviderRegistration(adapter, getDefaultPiProviderDependencies(), {
 		"refreshed-model": {
 			cost: { input: 1, output: 2, cacheRead: 0.1, cacheWrite: 0.25 },
-			quality: [
-				{
-					source: "artificial-analysis",
-					benchmark: "Artificial Analysis",
-					category: "intelligence",
-					metric: "score",
-					value: 48.5,
-				},
-			],
 		},
 	});
 
@@ -368,8 +354,7 @@ test("refreshes the pricing sidecar when a dynamic catalog changes", async () =>
 		cacheWrite: 0.25,
 	});
 	assert.equal(adapter.registration?.modelMetadata?.["initial-model"], undefined);
-	assert.equal(adapter.registration?.modelMetadata?.["refreshed-model"]?.pricing.source, "official");
-	assert.equal(adapter.registration?.modelMetadata?.["refreshed-model"]?.quality?.[0]?.category, "intelligence");
+	assert.equal(adapter.registration?.modelMetadata?.["refreshed-model"]?.pricing.source, "pi");
 });
 
 test("registers an OAuth-only Provider when its optional environment API key is absent", () => {
@@ -627,13 +612,19 @@ test("registers a discounted reference price and keeps pricing provenance", () =
 	});
 	assert.deepEqual(adapter.registration?.modelMetadata?.["model-alpha"]?.pricing, {
 		known: true,
-		source: "official",
+		source: "pi",
 		baseCost: { input: 5, output: 30, cacheRead: 0.5, cacheWrite: 6.25 },
 		effectiveCost: { input: 4, output: 24, cacheRead: 0.4, cacheWrite: 5 },
 		adjustment: {
 			multiplier: 0.8,
 			label: "20% provider discount",
 			source: "provider contract",
+		},
+		costBySku: {
+			input: "pi",
+			output: "pi",
+			cacheRead: "pi",
+			cacheWrite: "pi",
 		},
 	});
 });

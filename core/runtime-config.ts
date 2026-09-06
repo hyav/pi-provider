@@ -2,7 +2,6 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { isValidTimeoutMs } from "./deadline.ts";
 import type { PiProviderDefinition } from "./definition.ts";
-import { getDefaultOpenRouterMetadataCachePath, OPENROUTER_MODELS_URL } from "./official-pricing.ts";
 import { validatePricingPolicy } from "./pricing-adjustments.ts";
 import type { ProviderPricingPolicy, StoredCredentialLike } from "./types.ts";
 
@@ -12,21 +11,26 @@ export interface PiProviderDependencies {
 	modelDiscoveryTimeoutMs: number;
 	statusRequestTimeoutMs: number;
 	liveCheckRequestTimeoutMs: number;
-	officialPricingUrl: string;
-	officialPricingTimeoutMs: number;
-	officialPricingCacheTtlMs: number;
-	officialPricingMaxStaleMs: number;
-	/** Resolved Pi agent directory; empty disables disk persistence of pricing metadata. */
+	/** Resolved Pi agent directory. */
 	agentDir: string;
-	/** Persistent cache for OpenRouter metadata used by the pricing fallback. */
-	openRouterMetadataCachePath: string;
 	/** Read Pi's stored credential metadata; injected by the Pi entrypoint. */
 	readStoredCredential: (providerId: string) => StoredCredentialLike | undefined;
 	/** Wrap ANSI-aware text to a render width; injected by the Pi entrypoint. */
 	wrapTextWithAnsi: (text: string, width: number) => string[];
-	enableOfficialPricingFallback: boolean;
 	/** Optional Pi Provider-level price policies keyed by Provider ID. */
 	pricingPolicies?: Record<string, ProviderPricingPolicy>;
+	/** @deprecated OpenRouter pricing metadata has been removed. */
+	officialPricingUrl?: string;
+	/** @deprecated No longer used. */
+	officialPricingTimeoutMs?: number;
+	/** @deprecated No longer used. */
+	officialPricingCacheTtlMs?: number;
+	/** @deprecated No longer used. */
+	officialPricingMaxStaleMs?: number;
+	/** @deprecated No longer used. */
+	openRouterMetadataCachePath?: string;
+	/** @deprecated No longer used. */
+	enableOfficialPricingFallback?: boolean;
 }
 
 export type PiProviderLoader = (runtime: PiProviderDependencies) => Promise<PiProviderDefinition>;
@@ -90,7 +94,7 @@ function defaultWrapTextWithAnsi(text: string, width: number): string[] {
 	return chunks;
 }
 
-type DefaultDependencies = Omit<PiProviderDependencies, "agentDir" | "openRouterMetadataCachePath">;
+type DefaultDependencies = Omit<PiProviderDependencies, "agentDir">;
 
 const defaultDependencies: DefaultDependencies = {
 	fetch: globalThis.fetch,
@@ -98,25 +102,19 @@ const defaultDependencies: DefaultDependencies = {
 	modelDiscoveryTimeoutMs: 3_000,
 	statusRequestTimeoutMs: 8_000,
 	liveCheckRequestTimeoutMs: 8_000,
-	officialPricingUrl: OPENROUTER_MODELS_URL,
-	officialPricingTimeoutMs: 3_000,
-	officialPricingCacheTtlMs: 60 * 60 * 1_000,
-	officialPricingMaxStaleMs: 24 * 60 * 60 * 1_000,
 	readStoredCredential: () => undefined,
 	wrapTextWithAnsi: defaultWrapTextWithAnsi,
-	enableOfficialPricingFallback: true,
 	pricingPolicies: {},
 };
 
 /**
- * Programmatic defaults keep the resolved agent directory and its pricing cache
- * path. The Pi entrypoint overrides `agentDir` with Pi's own resolution.
+ * Programmatic defaults keep the resolved agent directory.
+ * The Pi entrypoint overrides `agentDir` with Pi's own resolution.
  */
 export function getDefaultPiProviderDependencies(agentDir = resolveDefaultAgentDir()): PiProviderDependencies {
 	return {
 		...defaultDependencies,
 		agentDir,
-		openRouterMetadataCachePath: getDefaultOpenRouterMetadataCachePath(agentDir),
 	};
 }
 
@@ -127,32 +125,17 @@ export function validatePiProviderDependencies(runtime: PiProviderDependencies):
 		["modelDiscoveryTimeoutMs", runtime.modelDiscoveryTimeoutMs],
 		["statusRequestTimeoutMs", runtime.statusRequestTimeoutMs],
 		["liveCheckRequestTimeoutMs", runtime.liveCheckRequestTimeoutMs],
-		["officialPricingTimeoutMs", runtime.officialPricingTimeoutMs],
 	] as const) {
 		if (!isValidTimeoutMs(value)) throw new Error(`Pi Provider ${name} must be a valid timeout`);
 	}
-	for (const [name, value] of [
-		["officialPricingCacheTtlMs", runtime.officialPricingCacheTtlMs],
-		["officialPricingMaxStaleMs", runtime.officialPricingMaxStaleMs],
-	] as const) {
-		if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
-			throw new Error(`Pi Provider ${name} must be a finite non-negative number`);
-		}
-	}
-	if (typeof runtime.officialPricingUrl !== "string" || runtime.officialPricingUrl.trim() === "") {
-		throw new Error("Pi Provider officialPricingUrl must be a non-empty string");
-	}
-	if (typeof runtime.openRouterMetadataCachePath !== "string") {
-		throw new Error("Pi Provider openRouterMetadataCachePath must be a string");
+	if (typeof runtime.agentDir !== "string") {
+		throw new Error("Pi Provider agentDir must be a string");
 	}
 	if (typeof runtime.readStoredCredential !== "function") {
 		throw new Error("Pi Provider readStoredCredential must be a function");
 	}
 	if (typeof runtime.wrapTextWithAnsi !== "function") {
 		throw new Error("Pi Provider wrapTextWithAnsi must be a function");
-	}
-	if (typeof runtime.enableOfficialPricingFallback !== "boolean") {
-		throw new Error("Pi Provider enableOfficialPricingFallback must be a boolean");
 	}
 	if (runtime.pricingPolicies !== undefined) {
 		if (
@@ -173,9 +156,6 @@ export function resolvePiProviderDependencies(
 	dependencies: Partial<PiProviderDependencies> = {},
 ): PiProviderDependencies {
 	const runtime = { ...getDefaultPiProviderDependencies(), ...dependencies };
-	if (!Object.hasOwn(dependencies, "openRouterMetadataCachePath")) {
-		runtime.openRouterMetadataCachePath = getDefaultOpenRouterMetadataCachePath(runtime.agentDir);
-	}
 	if (runtime.pricingPolicies === undefined) runtime.pricingPolicies = {};
 	validatePiProviderDependencies(runtime);
 	return runtime;

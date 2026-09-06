@@ -30,6 +30,7 @@ export interface ModelCatalogLifecycle {
 	catalog: ModelCatalogStatus;
 	getModels(): ProviderModelDraft[];
 	refreshModels(context: ProviderRefreshContext): Promise<ProviderModelDraft[]>;
+	setModels(models: ProviderModelDraft[], source?: ModelCatalogSource, updatedAt?: number): void;
 }
 
 function isAbortError(error: unknown): boolean {
@@ -272,6 +273,17 @@ export function createModelCatalogLifecycle(options: ModelCatalogLifecycleOption
 		}
 	};
 
+	const setModels = (nextModels: ProviderModelDraft[], source?: ModelCatalogSource, updatedAt?: number): void => {
+		applyModels(nextModels, source ?? (nextModels.length > 0 ? "cached" : "empty"), updatedAt);
+	};
+
 	options.onUpdate(models);
-	return { catalog, getModels: () => [...models], refreshModels };
+	const lifecycle: ModelCatalogLifecycle = {
+		catalog,
+		getModels: () => [...models],
+		refreshModels,
+		setModels,
+	};
+	(refreshModels as any).lifecycle = lifecycle;
+	return lifecycle;
 }

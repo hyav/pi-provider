@@ -1,21 +1,14 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { PiProviderDefinition } from "./definition.ts";
-import { validatePiProviderDefinition } from "./definition.ts";
+import { type PiProviderDefinition, validatePiProviderDefinition } from "./definition.ts";
 import { LiveCheckManager, type LiveCheckResult } from "./live-check-manager.ts";
 import {
-	fetchOfficialModelMetadata,
-	findOfficialMeta,
-	getPricingCacheAge,
-	type OfficialModelMeta,
-	OPENROUTER_MODELS_URL,
-} from "./official-pricing.ts";
-import type { PreflightContextLike } from "./preflight-manager.ts";
-import { PreflightManager } from "./preflight-manager.ts";
-import {
-	cancelDeferredProviderRegistrations,
-	refreshProviderRegistrations,
-	registerProviderAdapter,
-} from "./provider-registration.ts";
+	createEmptyCatalogSnapshot,
+	loadPiCatalog,
+	type PiCatalogSnapshot,
+	toPiCatalogSnapshot,
+} from "./pi-model-metadata.ts";
+import { type PreflightContextLike, PreflightManager } from "./preflight-manager.ts";
+import { cancelDeferredProviderRegistrations, registerProviderAdapter } from "./provider-registration.ts";
 import type { PiProviderDependencies, PiProviderLoader } from "./runtime-config.ts";
 import { resolvePiProviderDependencies } from "./runtime-config.ts";
 import type { StatusContextLike } from "./status-manager.ts";
@@ -30,7 +23,6 @@ import {
 } from "./status-report.ts";
 import { applyTunerAdapters, sortTunerAdapters } from "./tuner-manager.ts";
 import type {
-	ModelMetadataStatus,
 	ProviderAdapter,
 	ProviderCost,
 	ProviderModelDraft,
@@ -116,7 +108,9 @@ export function scheduleModelCatalogRefresh(ctx: Pick<ExtensionContext, "modelRe
 
 export interface PiProviderRuntimeController {
 	resetForSession(): void;
-	updateOfficialPricing?(snapshot: Record<string, OfficialModelMeta>): void;
+	/** @deprecated Kept for backwards compatibility. */
+	updateOfficialPricing?(snapshot: Record<string, unknown>): void;
+	updatePiCatalog?(snapshot: PiCatalogSnapshot): void;
 	shutdown(): void;
 	clearStatusPresentation(ctx: Pick<ExtensionContext, "ui">): void;
 	applyTunerPayload(payload: unknown, model: ActiveModel): unknown | undefined | Promise<unknown | undefined>;
@@ -135,23 +129,6 @@ function cloneProviderCost(cost: ProviderCost): ProviderCost {
 	};
 }
 
-function getOfficialMetadataStatus(
-	snapshot: Record<string, OfficialModelMeta>,
-	runtime: PiProviderDependencies,
-): ModelMetadataStatus | undefined {
-	const source = runtime.officialPricingUrl === OPENROUTER_MODELS_URL ? "AA/OpenRouter" : "Official metadata";
-	if (!runtime.enableOfficialPricingFallback && Object.keys(snapshot).length === 0) return undefined;
-	if (Object.keys(snapshot).length === 0) return { state: "unavailable", source };
-	const now = runtime.now();
-	const age = getPricingCacheAge(runtime.officialPricingUrl, now);
-	const updatedAt = age === undefined ? now : now - age;
-	return {
-		state: age !== undefined && age >= runtime.officialPricingCacheTtlMs ? "stale" : "fresh",
-		updatedAt,
-		source,
-	};
-}
-
 function hasKnownNativeCost(cost: ProviderCost | undefined): cost is ProviderCost {
 	if (!cost) return false;
 	return (
@@ -164,12 +141,7 @@ function hasKnownNativeCost(cost: ProviderCost | undefined): cost is ProviderCos
 }
 
 /** Build report-only metadata; never merge external fields into Pi's native model. */
-function getNativeModelMetadata(
-	model: ActiveModel,
-	officialPricing: Record<string, OfficialModelMeta>,
-): ProviderModelMetadata {
-	const officialMeta =
-		findOfficialMeta(`${model.provider}/${model.id}`, officialPricing) ?? findOfficialMeta(model.id, officialPricing);
+function getNativeModelMetadata(model: ActiveModel): ProviderModelMetadata {
 	const knownPrice = hasKnownNativeCost(model.cost);
 	return {
 		pricing: {
@@ -187,14 +159,6 @@ function getNativeModelMetadata(
 			reasoning: "native",
 			thinkingLevelMap: model.thinkingLevelMap === undefined ? "default" : "native",
 		},
-		...(officialMeta?.quality
-			? {
-					quality: officialMeta.quality.map((score) => ({
-						...score,
-						...(score.confidenceInterval ? { confidenceInterval: { ...score.confidenceInterval } } : {}),
-					})),
-				}
-			: {}),
 	};
 }
 
@@ -202,7 +166,7 @@ export function installPiProviderRuntime(
 	pi: ExtensionAPI,
 	runtime: PiProviderDependencies,
 	definition: PiProviderDefinition,
-	officialPricing: Record<string, OfficialModelMeta> = {},
+	piCatalogSnapshot: PiCatalogSnapshot | Record<string, unknown> = {},
 	options: {
 		registerHandlers?: boolean;
 		providerDrafts?: ReadonlyMap<ProviderAdapter, ProviderModelDraft[]>;
@@ -210,20 +174,20 @@ export function installPiProviderRuntime(
 ): PiProviderRuntimeController {
 	validatePiProviderDefinition(definition);
 	const registerHandlers = options.registerHandlers ?? true;
-	let currentOfficialPricing = officialPricing;
-	let currentOfficialMetadataStatus = getOfficialMetadataStatus(officialPricing, runtime);
+	let currentPiCatalog: PiCatalogSnapshot = toPiCatalogSnapshot(piCatalogSnapshot) ?? createEmptyCatalogSnapshot();
 	const providers = [...definition.providers].sort(compareAdapterIds);
 	const statuses = [...(definition.statuses ?? [])].sort(compareAdapterIds);
 	const preflights = [...(definition.preflights ?? [])].sort(compareAdapterIds);
 	const tuners = sortTunerAdapters(definition.tuners ?? []);
 
 	for (const adapter of providers) {
-		registerProviderAdapter(pi, adapter, runtime, officialPricing, options.providerDrafts?.get(adapter));
+		registerProviderAdapter(pi, adapter, runtime, currentPiCatalog, options.providerDrafts?.get(adapter));
 	}
 
 	const statusManager = new StatusManager(statuses, runtime.fetch, runtime.now);
 	const preflightManager = new PreflightManager(preflights, runtime.fetch, runtime.now);
 	const liveCheckManager = new LiveCheckManager(runtime.liveCheckRequestTimeoutMs, runtime.fetch, runtime.now);
+
 	let lifecycleGeneration = 0;
 	let statusPresentationGeneration = 0;
 	let statusPresentationVisible = false;
@@ -239,10 +203,9 @@ export function installPiProviderRuntime(
 		const native = resolveNativeProvider(createNativeProviderRegistry(ctx.modelRegistry), model.provider);
 		return {
 			provider,
-			metadataStatus: currentOfficialMetadataStatus,
 			modelMetadata:
 				provider?.registration?.modelMetadata?.[model.id] ??
-				(provider === undefined ? getNativeModelMetadata(model, currentOfficialPricing) : undefined),
+				(provider === undefined ? getNativeModelMetadata(model) : undefined),
 			status: statuses.find(({ providerId }) => providerId === model.provider),
 			preflight: preflights.find(({ providerId }) => providerId === model.provider),
 			nativeProvider: native.provider,
@@ -283,7 +246,6 @@ export function installPiProviderRuntime(
 			nativeLookupAvailable,
 			nativePreflight,
 			auth,
-			metadataStatus,
 		} = getStatusDetails(model, ctx);
 		const diagnostics = status ? statusManager.getDiagnostics(model.provider) : undefined;
 		const preflightDiagnostics = preflightManager.getDiagnostics(model.provider, model.id);
@@ -309,7 +271,6 @@ export function installPiProviderRuntime(
 						liveCheckDiagnostics?.pending === true ||
 						liveCheckDiagnostics?.lastError !== undefined),
 				modelMetadata,
-				metadataStatus,
 			},
 		);
 		const message = report.report;
@@ -423,8 +384,10 @@ export function installPiProviderRuntime(
 	const controller: PiProviderRuntimeController = {
 		resetForSession,
 		updateOfficialPricing(snapshot) {
-			currentOfficialPricing = snapshot;
-			currentOfficialMetadataStatus = getOfficialMetadataStatus(snapshot, runtime);
+			currentPiCatalog = toPiCatalogSnapshot(snapshot) ?? createEmptyCatalogSnapshot();
+		},
+		updatePiCatalog(snapshot) {
+			currentPiCatalog = toPiCatalogSnapshot(snapshot) ?? createEmptyCatalogSnapshot();
 		},
 		shutdown,
 		clearStatusPresentation,
@@ -464,52 +427,9 @@ export function createPiProviderRuntime(
 ): (pi: ExtensionAPI) => Promise<void> {
 	const runtime = resolvePiProviderDependencies(dependencies);
 	return async (pi) => {
-		let installedController: PiProviderRuntimeController | undefined;
-		let disposed = false;
-		let pricingRefreshController: AbortController | undefined;
-		const cachePath =
-			runtime.officialPricingUrl === OPENROUTER_MODELS_URL ? runtime.openRouterMetadataCachePath : undefined;
-		const fetchMetadata = (options: { allowNetwork?: boolean; signal?: AbortSignal } = {}) =>
-			fetchOfficialModelMetadata(
-				runtime.fetch,
-				runtime.officialPricingUrl,
-				runtime.officialPricingTimeoutMs,
-				runtime.officialPricingCacheTtlMs,
-				runtime.officialPricingMaxStaleMs,
-				runtime.now,
-				{ cachePath, ...options },
-			);
-		const officialPricingPromise = runtime.enableOfficialPricingFallback
-			? fetchMetadata({ allowNetwork: false })
-			: Promise.resolve({});
-		const definitionPromise = loadDefinition(runtime);
-		const [officialPricing, definition] = await Promise.all([officialPricingPromise, definitionPromise]);
+		const piCatalog = await loadPiCatalog({ fetch: runtime.fetch }).catch(() => ({ models: {}, providers: {} }));
+		const definition = await loadDefinition(runtime);
 		validatePiProviderDefinition(definition);
-
-		pi.on("session_start", () => {
-			pricingRefreshController?.abort();
-			pricingRefreshController = undefined;
-			if (!runtime.enableOfficialPricingFallback || disposed) {
-				return;
-			}
-			const controller = new AbortController();
-			pricingRefreshController = controller;
-			void fetchMetadata({ signal: controller.signal })
-				.then((snapshot) => {
-					if (disposed || controller.signal.aborted) return;
-					installedController?.updateOfficialPricing?.(snapshot);
-					refreshProviderRegistrations(pi, definition.providers, runtime, snapshot);
-				})
-				.catch(() => undefined)
-				.finally(() => {
-					if (pricingRefreshController === controller) pricingRefreshController = undefined;
-				});
-		});
-		pi.on("session_shutdown", () => {
-			disposed = true;
-			pricingRefreshController?.abort();
-			pricingRefreshController = undefined;
-		});
-		installedController = installPiProviderRuntime(pi, runtime, definition, officialPricing);
+		installPiProviderRuntime(pi, runtime, definition, piCatalog);
 	};
 }

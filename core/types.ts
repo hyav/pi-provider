@@ -4,7 +4,10 @@ import type {
 	ProviderConfig,
 	ProviderModelConfig,
 } from "@earendil-works/pi-coding-agent";
-import type { OfficialModelMeta } from "./official-pricing.ts";
+
+import type { ModelCatalogLifecycle } from "./model-catalog.ts";
+import type { PiCatalogModelMeta, PiCatalogSnapshot } from "./pi-model-metadata.ts";
+export type { PiCatalogModelMeta, PiCatalogSnapshot };
 
 export type ThinkingLevel = ReturnType<ExtensionAPI["getThinkingLevel"]>;
 
@@ -12,9 +15,17 @@ export type ProviderCost = ProviderModelConfig["cost"];
 export type ProviderModel = ProviderModelConfig;
 export type PricingSku = "input" | "output" | "cacheRead" | "cacheWrite";
 /** Pricing provenance used by Pi Provider sidecars; not added to Pi model objects. */
-export type ProviderPricingSource = "provider" | "fallback" | "official";
+export type ProviderPricingSource = "provider" | "fallback" | "official" | "pi" | "mixed";
 export type ModelPricingSource = ProviderPricingSource | "native";
-export type ModelFieldSource = ProviderPricingSource | "native" | "default" | "normalized";
+export type ModelFieldSource =
+	| "provider"
+	| "pi"
+	| "native"
+	| "default"
+	| "normalized"
+	| "mixed"
+	| "official"
+	| "fallback";
 export type ModelMetadataState = "fresh" | "stale" | "checking" | "unavailable";
 
 export interface ModelMetadataStatus {
@@ -41,8 +52,16 @@ export interface ProviderRequestAuth {
 	env?: Record<string, string>;
 }
 
+export interface ModelCostBySkuSources {
+	input?: ModelFieldSource;
+	output?: ModelFieldSource;
+	cacheRead?: ModelFieldSource;
+	cacheWrite?: ModelFieldSource;
+}
+
 export interface ModelFieldSources {
 	cost?: ModelFieldSource;
+	costBySku?: ModelCostBySkuSources;
 	contextWindow?: ModelFieldSource;
 	maxTokens?: ModelFieldSource;
 	input?: ModelFieldSource;
@@ -72,26 +91,12 @@ export interface ModelPricingDetails {
 	effectiveCost?: ProviderCost;
 	adjustment?: ProviderPricingAdjustment;
 	note?: string;
-}
-
-export interface ModelQualityScore {
-	source: string;
-	benchmark: string;
-	category: string;
-	metric: "elo" | "rating" | "score" | "ips";
-	value: number;
-	rank?: number;
-	winRate?: number;
-	confidenceInterval?: {
-		lower: number;
-		upper: number;
-	};
+	costBySku?: ModelCostBySkuSources;
 }
 
 export interface ProviderModelMetadata {
 	pricing: ModelPricingDetails;
 	fieldSources?: ModelFieldSources;
-	quality?: ModelQualityScore[];
 }
 
 export type ProviderModelDraft = Partial<ProviderModel> &
@@ -199,12 +204,16 @@ export interface ProviderAdapter {
 	/** Optional explicit price adjustments owned by this Provider. */
 	pricing?: ProviderPricingPolicy;
 	catalog?: ModelCatalogStatus;
+	lifecycle?: ModelCatalogLifecycle;
+	/** Whether to fallback to Pi's builtin catalog when fields are missing. Defaults to true. */
+	usePiModelMetaFallback?: boolean;
 	/** @internal Draft state shared across isolated Adapter and Host contexts. */
 	registration?: {
 		modelDrafts: ProviderModelDraft[];
 		normalizedModels: ProviderModel[];
 		modelMetadata: Record<string, ProviderModelMetadata>;
-		officialPricing: Record<string, OfficialModelMeta>;
+		piCatalog?: PiCatalogSnapshot;
+		officialPricing?: Record<string, any>;
 		activeRefreshes: number;
 		deferredRegistration?: () => void;
 	};

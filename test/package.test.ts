@@ -32,6 +32,7 @@ test("documents and prepares the agentDir adapter cache under extensions/pi-prov
 
 test("declares Pi-bundled runtime packages as open peers", () => {
 	assert.deepEqual(packageJson.peerDependencies, {
+		"@earendil-works/pi-ai": "*",
 		"@earendil-works/pi-coding-agent": "*",
 		"@earendil-works/pi-tui": "*",
 	});

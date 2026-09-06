@@ -77,9 +77,9 @@ test("uses consistent freshness lines for catalog, preflight, and account status
 		now,
 	);
 
-	assert.match(result.report, /Catalog:\n {2}Status: fresh · live · 1m ago\n {2}Models: 1/);
-	assert.match(result.report, /Preflight: passed · endpoint · fresh · 2m ago/);
-	assert.match(result.report, /Account:\n {2}Status: fresh · 3m ago/);
+	assert.match(result.report, /Catalog: fresh · live · 1 model · 1m ago/);
+	assert.match(result.report, /Health: preflight passed · endpoint · fresh · 2m ago · availability not checked/);
+	assert.match(result.report, /Account: fresh · 3m ago/);
 	assert.doesNotMatch(result.report, /Updated:/);
 });
 
@@ -124,13 +124,13 @@ test("shows model catalog retry backoff diagnostics", () => {
 		now,
 	);
 
-	assert.match(result.report, /Status: stale · cached · 1m ago/);
+	assert.match(result.report, /Catalog: stale · cached · 1 model · 1m ago/);
 	assert.match(result.report, /Skipped: 3 invalid · 1 duplicate/);
 	assert.match(result.report, /Error: fetch/);
 	assert.match(result.report, /Retry: in 30s · 2 consecutive failures/);
 });
 
-test("shows quality metrics and inline provenance without changing health severity", () => {
+test("shows provenance and thinking levels without changing health severity", () => {
 	const model: any = {
 		provider: "reference-provider",
 		id: "model-alpha",
@@ -160,42 +160,19 @@ test("shows quality metrics and inline provenance without changing health severi
 	const modelMetadata = {
 		pricing: {
 			known: true,
-			source: "official",
+			source: "pi",
 			baseCost: { input: 5, output: 30, cacheRead: 0.5, cacheWrite: 6.25 },
 			effectiveCost: model.cost,
 			adjustment: { multiplier: 0.8, label: "20% provider discount" },
 		},
 		fieldSources: {
-			cost: "official",
-			contextWindow: "official",
-			maxTokens: "official",
-			input: "official",
-			reasoning: "official",
-			thinkingLevelMap: "official",
+			cost: "pi",
+			contextWindow: "pi",
+			maxTokens: "pi",
+			input: "pi",
+			reasoning: "pi",
+			thinkingLevelMap: "pi",
 		},
-		quality: [
-			{
-				source: "artificial-analysis",
-				benchmark: "Artificial Analysis",
-				category: "intelligence",
-				metric: "score",
-				value: 51.2,
-			},
-			{
-				source: "artificial-analysis",
-				benchmark: "Artificial Analysis",
-				category: "coding",
-				metric: "score",
-				value: 71.4,
-			},
-			{
-				source: "artificial-analysis",
-				benchmark: "Artificial Analysis",
-				category: "agentic",
-				metric: "score",
-				value: 45.6,
-			},
-		],
 	} as ProviderModelMetadata;
 
 	const result = formatProviderStatus(
@@ -213,22 +190,18 @@ test("shows quality metrics and inline provenance without changing health severi
 		1_700_000_000_000,
 		{
 			modelMetadata,
-			metadataStatus: { state: "fresh", updatedAt: 1_699_999_280_000, source: "AA/OpenRouter" },
-		} as any,
+		},
 	);
 
-	assert.match(result.report, /Context: 128k · OpenRouter/);
-	assert.match(result.report, /Max output: 16k · OpenRouter/);
-	assert.match(result.report, /Input: text · OpenRouter/);
-	assert.match(result.report, /Reasoning: supported \(low, high\) · OpenRouter/);
-	assert.match(result.report, /Thinking levels: low, high · OpenRouter/);
+	assert.match(result.report, /Context: 128k · Pi catalog/);
+	assert.match(result.report, /Max output: 16k · Pi catalog/);
+	assert.match(result.report, /Input: text · Pi catalog/);
+	assert.match(result.report, /Thinking levels: low, high · Pi catalog/);
+	assert.doesNotMatch(result.report, /Reasoning:/);
+	assert.doesNotMatch(result.report, /Quality:/);
 	assert.match(
 		result.report,
-		/Quality:\n {2}Status: fresh · 12m ago\n {2}Source: AA\/OpenRouter\n {2}Indices: intelligence 51.2 · coding 71.4 · agentic 45.6/,
-	);
-	assert.match(
-		result.report,
-		/Pricing: \$4 input \/ \$24 output \/ \$0.4 cache read \/ \$5 cache write per 1M tokens · OpenRouter · 20% provider discount · estimate/,
+		/Pricing: \$4 input \/ \$24 output \/ \$0.4 cache read \/ \$5 cache write per 1M tokens · Pi catalog · 20% provider discount · estimate/,
 	);
 	assert.match(
 		result.report,

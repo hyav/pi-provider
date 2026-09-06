@@ -1,11 +1,11 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { LiveCheckDiagnostics } from "./live-check-manager.ts";
+import type { PiCatalogModelMeta } from "./pi-model-metadata.ts";
 import type { PreflightAdapter, PreflightDiagnostics } from "./preflight-manager.ts";
 import type { StatusDiagnostics } from "./status-manager.ts";
 import type {
 	ModelFieldSource,
 	ModelMetadataStatus,
-	ModelQualityScore,
 	ProviderAdapter,
 	ProviderCost,
 	ProviderModelMetadata,
@@ -39,6 +39,10 @@ export interface StatusReportOptions {
 	showLiveCheckScope?: boolean;
 	modelMetadata?: ProviderModelMetadata;
 	metadataStatus?: ModelMetadataStatus;
+	piCatalogMatch?: {
+		matchedModel?: PiCatalogModelMeta;
+		matchType: string;
+	};
 }
 
 interface ReportIssue {
@@ -91,7 +95,10 @@ function formatTokens(count: number | undefined): string {
 
 function formatNumber(value: number): string {
 	if (!Number.isFinite(value)) return "unknown";
-	return value.toFixed(2).replace(/\.?(0+)$/, "");
+	const normalized = Object.is(value, -0) ? 0 : value;
+	const formatted = normalized.toFixed(2).replace(/\.?(0+)$/, "");
+	if (formatted === "-0" || formatted === "") return "0";
+	return formatted;
 }
 
 function formatAge(now: number, timestamp: number): string {
@@ -152,67 +159,38 @@ function formatPricingTier(tier: NonNullable<ProviderCost["tiers"]>[number]): st
 	return `above ${formatTokens(tier.inputTokensAbove)} · ${rates.join(" / ")} per 1M tokens`;
 }
 
-function formatQuality(quality: ModelQualityScore[], status: ModelMetadataStatus | undefined, now: number): string[] {
-	const scores = quality.filter(
-		(score) => score.source === "artificial-analysis" && score.benchmark === "Artificial Analysis",
-	);
-	if (scores.length === 0) return [];
-	const statusParts = [`Status: ${status?.state ?? "available"}`];
-	if (status?.updatedAt !== undefined) statusParts.push(formatAge(now, status.updatedAt));
-	return [
-		statusParts.join(" · "),
-		`Source: ${status?.source ?? "AA/OpenRouter"}`,
-		`Indices: ${scores.map((score) => `${score.category} ${formatNumber(score.value)}`).join(" · ")}`,
-	];
-}
-
 function formatModelFieldSource(source: ModelFieldSource | undefined): string {
-	if (source === undefined) return "";
+	if (source === undefined || source === "provider") return "";
 	const label =
 		source === "native"
 			? "Pi native"
-			: source === "provider"
-				? "Provider catalog"
-				: source === "official"
-					? "OpenRouter"
-					: source === "fallback"
-						? "Provider fallback"
-						: source === "normalized"
-							? "Normalized catalog value"
+			: source === "pi"
+				? "Pi catalog"
+				: source === "fallback"
+					? "Provider fallback"
+					: source === "normalized"
+						? "Normalized catalog value"
+						: source === "mixed"
+							? "mixed"
 							: "Pi default";
 	return ` · ${label}`;
 }
 
 function formatPricingSource(metadata: ProviderModelMetadata): string {
 	const source =
-		metadata.pricing.source === "provider"
-			? "Provider catalog"
-			: metadata.pricing.source === "fallback"
-				? "Provider fallback"
-				: metadata.pricing.source === "official"
-					? "OpenRouter"
+		metadata.pricing.source === "fallback"
+			? "Provider fallback"
+			: metadata.pricing.source === "pi"
+				? "Pi catalog"
+				: metadata.pricing.source === "mixed"
+					? "mixed"
 					: metadata.pricing.source === "native"
 						? "Pi native"
 						: undefined;
 	const parts = source ? [source] : [];
 	if (metadata.pricing.adjustment) parts.push(metadata.pricing.adjustment.label);
-	if (metadata.pricing.known) parts.push("estimate");
+	if (metadata.pricing.known && metadata.pricing.source !== "provider") parts.push("estimate");
 	return parts.length > 0 ? ` · ${parts.join(" · ")}` : "";
-}
-
-function formatQualitySource(
-	quality: ModelQualityScore[] | undefined,
-	status: ModelMetadataStatus | undefined,
-	now: number,
-): string[] {
-	const scores = quality ? formatQuality(quality, status, now) : [];
-	if (scores.length > 0) return scores;
-	if (!status?.source) return [];
-	return [
-		status.source === "AA/OpenRouter"
-			? "Status: unavailable · no AA/OpenRouter metric"
-			: "Status: unavailable · no public score",
-	];
 }
 
 const REASONING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
@@ -226,10 +204,19 @@ function getSupportedReasoningLevels(model: ActiveModel): string[] {
 	});
 }
 
-function formatReasoning(model: ActiveModel): string {
-	if (!model.reasoning) return "not supported";
+function formatThinkingLevelsLine(model: ActiveModel, metadata?: ProviderModelMetadata): string {
+	const fieldSources = metadata?.fieldSources;
+	if (model.reasoning === false) {
+		return `  Thinking levels: not supported${formatModelFieldSource(fieldSources?.reasoning)}`;
+	}
 	const levels = getSupportedReasoningLevels(model);
-	return levels.length > 0 ? `supported (${levels.join(", ")})` : "supported";
+	if (levels.length > 0) {
+		return `  Thinking levels: ${levels.join(", ")}${formatModelFieldSource(fieldSources?.thinkingLevelMap)}`;
+	}
+	if (model.reasoning === true) {
+		return `  Thinking levels: supported${formatModelFieldSource(fieldSources?.reasoning)}`;
+	}
+	return "  Thinking levels: unavailable";
 }
 
 export function resolveNativeProvider(modelRegistry: NativeProviderRegistry, providerId: string): NativeProviderLookup {
@@ -264,32 +251,40 @@ function formatCatalog(
 	nativeProvider: NativeProvider | undefined,
 	nativeLookupAvailable: boolean,
 	now: number,
-): { lines: string[]; issue: ReportIssue } {
+): { summary: string; detailLines: string[]; issue: ReportIssue } {
 	if (!adapter) {
-		if (!nativeLookupAvailable) return { lines: ["Status: not managed by Pi Provider"], issue: { level: "none" } };
-		if (!nativeProvider) return { lines: ["Status: unavailable in Pi"], issue: { level: "none" } };
+		if (!nativeLookupAvailable) {
+			return { summary: "Catalog: not managed by Pi Provider", detailLines: [], issue: { level: "none" } };
+		}
+		if (!nativeProvider) {
+			return { summary: "Catalog: unavailable in Pi", detailLines: [], issue: { level: "none" } };
+		}
 		const count = getNativeModelCount(nativeProvider);
+		const countStr = count === undefined ? "unknown" : `${count} ${count === 1 ? "model" : "models"}`;
 		return {
-			lines: ["Status: static · Pi native", `Models: ${count === undefined ? "unknown" : count}`],
+			summary: `Catalog: static · Pi native · ${countStr}`,
+			detailLines: [],
 			issue: { level: "none" },
 		};
 	}
 	const catalog = adapter.catalog;
 	const count = catalog?.modelCount ?? adapter.provider.models.length;
+	const countStr = `${count} ${count === 1 ? "model" : "models"}`;
 	const source = catalog?.source ?? "static";
 	const freshness = catalog?.lastError ? "stale" : catalog?.updatedAt !== undefined ? "fresh" : undefined;
-	const statusParts = freshness ? [freshness, source] : [source];
+	const statusParts = freshness ? [freshness, source, countStr] : [source, countStr];
 	if (catalog?.updatedAt !== undefined) statusParts.push(formatAge(now, catalog.updatedAt));
-	const lines = [`Status: ${statusParts.join(" · ")}`, `Models: ${count}`];
+	const summary = `Catalog: ${statusParts.join(" · ")}`;
+	const detailLines: string[] = [];
 	const rejectedCount = catalog?.rejectedCount ?? 0;
 	const duplicateCount = catalog?.duplicateCount ?? 0;
 	if (rejectedCount > 0 || duplicateCount > 0) {
-		lines.push(`Skipped: ${rejectedCount} invalid · ${duplicateCount} duplicate`);
+		detailLines.push(`Skipped: ${rejectedCount} invalid · ${duplicateCount} duplicate`);
 	}
-	if (catalog?.lastError) lines.push(`Error: ${catalog.lastError}`);
+	if (catalog?.lastError) detailLines.push(`Error: ${catalog.lastError}`);
 	if (catalog?.lastError && catalog.nextRetryAt !== undefined) {
 		const failures = catalog.consecutiveFailures ?? 1;
-		lines.push(
+		detailLines.push(
 			`Retry: ${formatUntil(now, catalog.nextRetryAt)} · ${failures} consecutive failure${failures === 1 ? "" : "s"}`,
 		);
 	}
@@ -300,7 +295,7 @@ function formatCatalog(
 					key: `catalog:${catalog.lastError}`,
 				}
 			: { level: "none" as const };
-	return { lines, issue };
+	return { summary, detailLines, issue };
 }
 
 function classifyError(code: string, httpStatus: number | undefined): StatusWarningLevel {
@@ -345,116 +340,57 @@ function formatStatusEntry(entry: StatusEntry): string {
 	return `${entry.label}: ${remaining}${entry.resetAt !== undefined ? ` · reset at ${formatDateTime(entry.resetAt)}` : ""}`;
 }
 
-function appendStatusReport(
-	lines: string[],
+function formatAccount(
 	status: StatusAdapter | undefined,
 	diagnostics: StatusDiagnostics | undefined,
 	authConfigured: boolean,
 	now: number,
-): ReportIssue {
+): { summary: string; detailLines: string[]; issue: ReportIssue } {
 	if (!status) {
-		lines.push("Status: not supported");
-		return { level: "none" };
+		return { summary: "Account: not supported", detailLines: [], issue: { level: "none" } };
 	}
 	if (!authConfigured) {
-		lines.push("Status: unavailable · auth missing");
-		return { level: "none" };
+		return { summary: "Account: unavailable · auth missing", detailLines: [], issue: { level: "none" } };
 	}
+	let summary: string;
+	const detailLines: string[] = [];
+	let issue: ReportIssue = { level: "none" };
+
 	if (diagnostics?.snapshot) {
 		const expired = now - diagnostics.snapshot.updatedAt >= status.cacheTtlMs;
 		const stale = diagnostics.lastError !== undefined || expired;
-		lines.push(`Status: ${stale ? "stale" : "fresh"} · ${formatAge(now, diagnostics.snapshot.updatedAt)}`);
-		for (const entry of diagnostics.snapshot.entries) lines.push(formatStatusEntry(entry));
-	} else if (diagnostics?.pending) {
-		lines.push("Status: checking");
-	} else {
-		lines.push("Status: unavailable");
-	}
-	if (!diagnostics?.lastError) return { level: "none" };
-	const httpStatus =
-		diagnostics.lastError.httpStatus !== undefined ? ` · ${formatHttpStatus(diagnostics.lastError.httpStatus)}` : "";
-	lines.push(`Error: ${diagnostics.lastError.code}${httpStatus}`);
-	if (diagnostics.lastError.retryAt !== undefined && diagnostics.lastError.retryAt > now) {
-		lines.push(`Retry: ${formatUntil(now, diagnostics.lastError.retryAt)}`);
-	}
-	return errorIssue("status", diagnostics.lastError.code, diagnostics.lastError.httpStatus);
-}
-
-function appendPreflightReport(
-	lines: string[],
-	preflight: PreflightAdapter | undefined,
-	diagnostics: PreflightDiagnostics | undefined,
-	nativePreflight: NativePreflightStatus | undefined,
-	authConfigured: boolean,
-	now: number,
-): ReportIssue {
-	if (!preflight) {
-		if (!nativePreflight) {
-			lines.push("Preflight: not configured");
-			return { level: "none" };
-		}
-		if (!nativePreflight.providerAvailable) {
-			lines.push("Preflight: failed · Pi provider unavailable");
-			return { level: "hard", key: "preflight:provider-unavailable" };
-		}
-		if (!authConfigured) {
-			lines.push("Preflight: native · provider/catalog · auth missing");
-			return { level: "none" };
-		}
-		if (!nativePreflight.modelMatched) {
-			lines.push("Preflight: failed · native/provider/auth/catalog");
-			lines.push("Preflight detail: model not in Pi catalog");
-			return { level: "hard", key: "preflight:model-not-in-catalog" };
-		}
-		lines.push("Preflight: native · provider/auth/catalog");
-		return { level: "none" };
-	}
-	if (!authConfigured) {
-		lines.push("Preflight: skipped · auth missing");
-		return { level: "none" };
-	}
-	if (!diagnostics?.snapshot) {
-		if (diagnostics?.pending) {
-			lines.push("Preflight: checking");
-			return { level: "none" };
-		}
-		if (diagnostics?.lastError) {
-			const httpStatus =
-				diagnostics.lastError.httpStatus !== undefined
-					? ` · ${formatHttpStatus(diagnostics.lastError.httpStatus)}`
-					: "";
-			lines.push(`Preflight: unavailable · error ${diagnostics.lastError.code}${httpStatus}`);
-			if (diagnostics.lastError.retryAt !== undefined && diagnostics.lastError.retryAt > now) {
-				lines.push(`Retry: ${formatUntil(now, diagnostics.lastError.retryAt)}`);
+		const freshness = stale ? "stale" : "fresh";
+		const age = formatAge(now, diagnostics.snapshot.updatedAt);
+		const entries = diagnostics.snapshot.entries;
+		if (entries.length === 1 && entries[0]?.kind === "amount") {
+			summary = `Account: ${freshness} · ${entries[0].label.toLowerCase()} ${formatStatusAmount(entries[0])} · ${age}`;
+		} else if (entries.length === 0) {
+			summary = `Account: ${freshness} · ${age}`;
+		} else {
+			summary = `Account: ${freshness} · ${age}`;
+			for (const entry of entries) {
+				detailLines.push(formatStatusEntry(entry));
 			}
-			return errorIssue("preflight", diagnostics.lastError.code, diagnostics.lastError.httpStatus);
 		}
-		lines.push("Preflight: not checked");
-		return { level: "none" };
+	} else if (diagnostics?.pending) {
+		summary = "Account: checking";
+	} else {
+		summary = "Account: unavailable";
 	}
 
-	const expired = now - diagnostics.snapshot.updatedAt >= preflight.cacheTtlMs;
-	const stale = expired || diagnostics.lastError !== undefined;
-	const state = diagnostics.snapshot.passed ? "passed" : "failed";
-	const freshness = stale ? "stale" : "fresh";
-	const checks = diagnostics.snapshot.checks.length > 0 ? ` · ${diagnostics.snapshot.checks.join("/")}` : "";
-	lines.push(`Preflight: ${state}${checks} · ${freshness} · ${formatAge(now, diagnostics.snapshot.updatedAt)}`);
-	if (diagnostics.lastError) {
+	if (diagnostics?.lastError) {
 		const httpStatus =
 			diagnostics.lastError.httpStatus !== undefined
 				? ` · ${formatHttpStatus(diagnostics.lastError.httpStatus)}`
 				: "";
-		lines.push(`Preflight error: ${diagnostics.lastError.code}${httpStatus}`);
+		detailLines.push(`Error: ${diagnostics.lastError.code}${httpStatus}`);
 		if (diagnostics.lastError.retryAt !== undefined && diagnostics.lastError.retryAt > now) {
-			lines.push(`Retry: ${formatUntil(now, diagnostics.lastError.retryAt)}`);
+			detailLines.push(`Retry: ${formatUntil(now, diagnostics.lastError.retryAt)}`);
 		}
+		issue = errorIssue("status", diagnostics.lastError.code, diagnostics.lastError.httpStatus);
 	}
-	if (!diagnostics.snapshot.passed) {
-		return { level: "hard", key: "preflight:failed" };
-	}
-	return diagnostics.lastError
-		? errorIssue("preflight", diagnostics.lastError.code, diagnostics.lastError.httpStatus)
-		: { level: "none" };
+
+	return { summary, detailLines, issue };
 }
 
 function formatLatency(latencyMs: number): string {
@@ -483,54 +419,143 @@ function formatHttpStatus(status: number): string {
 	return `HTTP ${status}${labels[status] ? ` ${labels[status]}` : ""}`;
 }
 
-function appendLiveCheckReport(
-	lines: string[],
-	diagnostics: LiveCheckDiagnostics | undefined,
+function formatHealth(
+	preflight: PreflightAdapter | undefined,
+	preflightDiagnostics: PreflightDiagnostics | undefined,
+	nativePreflight: NativePreflightStatus | undefined,
+	liveCheckDiagnostics: LiveCheckDiagnostics | undefined,
 	authConfigured: boolean,
 	now: number,
-	options: { requested?: boolean; showScope?: boolean } = {},
-): ReportIssue {
-	if (!authConfigured) {
-		lines.push("Availability: skipped · auth missing");
-		return { level: "none" };
-	}
-	if (options.showScope) {
-		lines.push("Live check scope: streamSimple() · Pi Provider tuners only (other hooks not replayed)");
-	}
-	if (diagnostics?.pending) lines.push("Availability: checking");
-	else if (!diagnostics?.snapshot && !diagnostics?.lastError) lines.push("Availability: not checked");
-	else if (!diagnostics?.snapshot && diagnostics.lastError) {
-		const status =
-			diagnostics.lastError.httpStatus !== undefined
-				? ` · ${formatHttpStatus(diagnostics.lastError.httpStatus)}`
-				: "";
-		lines.push(`Availability: failed${status}`);
-		lines.push(`Live check error: ${diagnostics.lastError.code}`);
-		if (diagnostics.lastError.retryAt !== undefined && diagnostics.lastError.retryAt > now) {
-			lines.push(`Retry: ${formatUntil(now, diagnostics.lastError.retryAt)}`);
+	options: { liveCheckRequested?: boolean; showLiveCheckScope?: boolean } = {},
+): { summary: string; detailLines: string[]; preflightIssue: ReportIssue; liveCheckIssue: ReportIssue } {
+	let preflightSummary: string;
+	const preflightDetailLines: string[] = [];
+	let preflightIssue: ReportIssue = { level: "none" };
+
+	if (!preflight) {
+		if (!nativePreflight) {
+			preflightSummary = authConfigured ? "preflight not configured" : "preflight skipped · auth missing";
+		} else if (!nativePreflight.providerAvailable) {
+			preflightSummary = "preflight failed · Pi provider unavailable";
+			preflightIssue = { level: "hard", key: "preflight:provider-unavailable" };
+		} else if (!authConfigured) {
+			preflightSummary = "preflight native · provider/catalog · auth missing";
+		} else if (!nativePreflight.modelMatched) {
+			preflightSummary = "preflight failed · native/provider/auth/catalog";
+			preflightDetailLines.push("Preflight detail: model not in Pi catalog");
+			preflightIssue = { level: "hard", key: "preflight:model-not-in-catalog" };
+		} else {
+			preflightSummary = "preflight native · provider/auth/catalog";
 		}
-		return options.requested ? { level: "hard", key: `live-check:${diagnostics.lastError.code}` } : { level: "soft" };
-	} else if (diagnostics?.snapshot) {
-		const stale = diagnostics.lastError !== undefined;
-		lines.push(`Availability: ${stale ? "stale" : "verified"} · ${formatAge(now, diagnostics.snapshot.checkedAt)}`);
-		const httpStatus =
-			diagnostics.snapshot.httpStatus !== undefined
-				? formatHttpStatus(diagnostics.snapshot.httpStatus)
-				: "HTTP status unknown";
-		lines.push(
-			`Live check: ${stale ? "last success" : "success"} · ${httpStatus} · ${formatLatency(diagnostics.snapshot.latencyMs)}`,
-		);
-		if (diagnostics.lastError) {
-			lines.push(`Live check error: ${diagnostics.lastError.code}`);
-			if (diagnostics.lastError.retryAt !== undefined && diagnostics.lastError.retryAt > now) {
-				lines.push(`Retry: ${formatUntil(now, diagnostics.lastError.retryAt)}`);
+	} else if (!authConfigured) {
+		preflightSummary = "preflight skipped · auth missing";
+	} else if (!preflightDiagnostics?.snapshot) {
+		if (preflightDiagnostics?.pending) {
+			preflightSummary = "preflight checking";
+		} else if (preflightDiagnostics?.lastError) {
+			const httpStatus =
+				preflightDiagnostics.lastError.httpStatus !== undefined
+					? ` · ${formatHttpStatus(preflightDiagnostics.lastError.httpStatus)}`
+					: "";
+			preflightSummary = `preflight unavailable · error ${preflightDiagnostics.lastError.code}${httpStatus}`;
+			if (preflightDiagnostics.lastError.retryAt !== undefined && preflightDiagnostics.lastError.retryAt > now) {
+				preflightDetailLines.push(`Retry: ${formatUntil(now, preflightDiagnostics.lastError.retryAt)}`);
 			}
-			return options.requested
-				? { level: "hard", key: `live-check:${diagnostics.lastError.code}` }
+			preflightIssue = errorIssue(
+				"preflight",
+				preflightDiagnostics.lastError.code,
+				preflightDiagnostics.lastError.httpStatus,
+			);
+		} else {
+			preflightSummary = "preflight not checked";
+		}
+	} else {
+		const expired = now - preflightDiagnostics.snapshot.updatedAt >= preflight.cacheTtlMs;
+		const stale = expired || preflightDiagnostics.lastError !== undefined;
+		const state = preflightDiagnostics.snapshot.passed ? "passed" : "failed";
+		const freshness = stale ? "stale" : "fresh";
+		const checks =
+			preflightDiagnostics.snapshot.checks.length > 0 ? ` · ${preflightDiagnostics.snapshot.checks.join("/")}` : "";
+		preflightSummary = `preflight ${state}${checks} · ${freshness} · ${formatAge(now, preflightDiagnostics.snapshot.updatedAt)}`;
+		if (preflightDiagnostics.lastError) {
+			const httpStatus =
+				preflightDiagnostics.lastError.httpStatus !== undefined
+					? ` · ${formatHttpStatus(preflightDiagnostics.lastError.httpStatus)}`
+					: "";
+			preflightDetailLines.push(`Preflight error: ${preflightDiagnostics.lastError.code}${httpStatus}`);
+			if (preflightDiagnostics.lastError.retryAt !== undefined && preflightDiagnostics.lastError.retryAt > now) {
+				preflightDetailLines.push(`Retry: ${formatUntil(now, preflightDiagnostics.lastError.retryAt)}`);
+			}
+		}
+		if (!preflightDiagnostics.snapshot.passed) {
+			preflightIssue = { level: "hard", key: "preflight:failed" };
+		} else if (preflightDiagnostics.lastError) {
+			preflightIssue = errorIssue(
+				"preflight",
+				preflightDiagnostics.lastError.code,
+				preflightDiagnostics.lastError.httpStatus,
+			);
+		}
+	}
+
+	let availabilitySummary: string;
+	const liveCheckDetailLines: string[] = [];
+	let liveCheckIssue: ReportIssue = { level: "none" };
+
+	if (!authConfigured) {
+		availabilitySummary = "availability skipped · auth missing";
+	} else if (liveCheckDiagnostics?.pending) {
+		availabilitySummary = "availability checking";
+	} else if (!liveCheckDiagnostics?.snapshot && !liveCheckDiagnostics?.lastError) {
+		availabilitySummary = "availability not checked";
+	} else if (!liveCheckDiagnostics?.snapshot && liveCheckDiagnostics.lastError) {
+		const status =
+			liveCheckDiagnostics.lastError.httpStatus !== undefined
+				? ` · ${formatHttpStatus(liveCheckDiagnostics.lastError.httpStatus)}`
+				: "";
+		availabilitySummary = `availability failed${status}`;
+		liveCheckDetailLines.push(`Live check error: ${liveCheckDiagnostics.lastError.code}`);
+		if (liveCheckDiagnostics.lastError.retryAt !== undefined && liveCheckDiagnostics.lastError.retryAt > now) {
+			liveCheckDetailLines.push(`Retry: ${formatUntil(now, liveCheckDiagnostics.lastError.retryAt)}`);
+		}
+		liveCheckIssue = options.liveCheckRequested
+			? { level: "hard", key: `live-check:${liveCheckDiagnostics.lastError.code}` }
+			: { level: "soft" };
+	} else if (liveCheckDiagnostics?.snapshot) {
+		const stale = liveCheckDiagnostics.lastError !== undefined;
+		availabilitySummary = `availability ${stale ? "stale" : "verified"} · ${formatAge(now, liveCheckDiagnostics.snapshot.checkedAt)}`;
+		const httpStatus =
+			liveCheckDiagnostics.snapshot.httpStatus !== undefined
+				? formatHttpStatus(liveCheckDiagnostics.snapshot.httpStatus)
+				: "HTTP status unknown";
+		liveCheckDetailLines.push(
+			`Live check: ${stale ? "last success" : "success"} · ${httpStatus} · ${formatLatency(liveCheckDiagnostics.snapshot.latencyMs)}`,
+		);
+		if (liveCheckDiagnostics.lastError) {
+			liveCheckDetailLines.push(`Live check error: ${liveCheckDiagnostics.lastError.code}`);
+			if (liveCheckDiagnostics.lastError.retryAt !== undefined && liveCheckDiagnostics.lastError.retryAt > now) {
+				liveCheckDetailLines.push(`Retry: ${formatUntil(now, liveCheckDiagnostics.lastError.retryAt)}`);
+			}
+			liveCheckIssue = options.liveCheckRequested
+				? { level: "hard", key: `live-check:${liveCheckDiagnostics.lastError.code}` }
 				: { level: "soft" };
 		}
+	} else {
+		availabilitySummary = "availability not checked";
 	}
-	return { level: "none" };
+
+	const detailLines: string[] = [];
+	if (options.showLiveCheckScope) {
+		detailLines.push("Live check scope: streamSimple() · Pi Provider tuners only (other hooks not replayed)");
+	}
+	detailLines.push(...preflightDetailLines, ...liveCheckDetailLines);
+
+	return {
+		summary: `Health: ${preflightSummary} · ${availabilitySummary}`,
+		detailLines,
+		preflightIssue,
+		liveCheckIssue,
+	};
 }
 
 export function formatProviderStatus(
@@ -550,39 +575,35 @@ export function formatProviderStatus(
 ): { report: string; warningKey?: string; warningLevel: StatusWarningLevel } {
 	const catalog = formatCatalog(provider, nativeProvider, nativeLookupAvailable, now);
 	const catalogIssue = scopeIssue(catalog.issue, `catalog:${model.provider}`);
-	const healthLines: string[] = [];
-	const preflightIssue = scopeIssue(
-		appendPreflightReport(healthLines, preflight, preflightDiagnostics, nativePreflight, auth.configured, now),
-		`preflight:${model.provider}/${model.id}`,
+	const health = formatHealth(
+		preflight,
+		preflightDiagnostics,
+		nativePreflight,
+		liveCheckDiagnostics,
+		auth.configured,
+		now,
+		{
+			liveCheckRequested: options.liveCheckRequested,
+			showLiveCheckScope: options.showLiveCheckScope,
+		},
 	);
-	const liveCheckIssue = scopeIssue(
-		appendLiveCheckReport(healthLines, liveCheckDiagnostics, auth.configured, now, {
-			requested: options.liveCheckRequested,
-			showScope: options.showLiveCheckScope,
-		}),
-		`live-check:${model.provider}/${model.id}`,
-	);
-	const accountLines: string[] = [];
-	const statusIssue = scopeIssue(
-		appendStatusReport(accountLines, status, diagnostics, auth.configured, now),
-		`status:${model.provider}`,
-	);
+	const preflightIssue = scopeIssue(health.preflightIssue, `preflight:${model.provider}/${model.id}`);
+	const liveCheckIssue = scopeIssue(health.liveCheckIssue, `live-check:${model.provider}/${model.id}`);
+	const account = formatAccount(status, diagnostics, auth.configured, now);
+	const statusIssue = scopeIssue(account.issue, `status:${model.provider}`);
 	const fieldSources = options.modelMetadata?.fieldSources;
-	const qualityLines = formatQualitySource(options.modelMetadata?.quality, options.metadataStatus, now);
 	const pricingSource = options.modelMetadata?.pricing ? formatPricingSource(options.modelMetadata) : "";
 	const lines = [
 		`Provider: ${model.provider}`,
 		`Model: ${model.id}`,
 		`Auth: ${auth.configured ? `configured${auth.source ? ` (${auth.source})` : ""}` : "missing"}`,
 		"",
-		"Catalog:",
-		...indentLines(catalog.lines),
-		"",
-		"Health:",
-		...indentLines(healthLines),
-		"",
-		"Account:",
-		...indentLines(accountLines),
+		catalog.summary,
+		...indentLines(catalog.detailLines),
+		health.summary,
+		...indentLines(health.detailLines),
+		account.summary,
+		...indentLines(account.detailLines),
 		"",
 		"Model details:",
 		`  API: ${model.api ?? provider?.provider.api ?? "managed by Pi"}`,
@@ -590,16 +611,10 @@ export function formatProviderStatus(
 		`  Context: ${formatTokens(model.contextWindow)}${formatModelFieldSource(fieldSources?.contextWindow)}`,
 		`  Max output: ${formatTokens(model.maxTokens)}${formatModelFieldSource(fieldSources?.maxTokens)}`,
 		`  Input: ${model.input?.join(", ") || "unknown"}${formatModelFieldSource(fieldSources?.input)}`,
-		`  Reasoning: ${formatReasoning(model)}${formatModelFieldSource(fieldSources?.reasoning)}`,
-		...(model.thinkingLevelMap
-			? [
-					`  Thinking levels: ${getSupportedReasoningLevels(model).join(", ") || "none"}${formatModelFieldSource(fieldSources?.thinkingLevelMap)}`,
-				]
-			: []),
+		formatThinkingLevelsLine(model, options.modelMetadata),
 		`  Pricing: ${formatPricing(model, options.modelMetadata)}${pricingSource}`,
 		...(model.cost?.tiers?.map((tier) => `  Pricing tier: ${formatPricingTier(tier)}`) ?? []),
 		...(options.modelMetadata?.pricing?.note ? [`  Pricing note: ${options.modelMetadata.pricing.note}`] : []),
-		...(qualityLines.length > 0 ? ["", "Quality:", ...indentLines(qualityLines)] : []),
 	];
 	const issue = combineIssues(catalogIssue, preflightIssue, liveCheckIssue, statusIssue);
 	return {
