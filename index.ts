@@ -1,3 +1,4 @@
+import * as piBuiltinCatalog from "@earendil-works/pi-ai/providers/all";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { getAgentDir, readStoredCredential } from "@earendil-works/pi-coding-agent";
 import { wrapTextWithAnsi } from "@earendil-works/pi-tui";
@@ -153,6 +154,11 @@ export function createPiProviderExtension(
 					wrapTextWithAnsi: typeof wrapTextWithAnsi;
 					adapterRoot?: string;
 					dependencies?: Partial<PiProviderDependencies>;
+					piCatalogSource: {
+						getBuiltinProviders: () => string[];
+						getBuiltinModels: (provider: string) => unknown[];
+						getBuiltinModelDataGeneratedAt: () => number | undefined;
+					};
 				},
 			) => Promise<void>;
 		};
@@ -162,6 +168,12 @@ export function createPiProviderExtension(
 			wrapTextWithAnsi,
 			adapterRoot: options.adapterRoot,
 			dependencies: options.dependencies,
+			piCatalogSource: {
+				getBuiltinProviders: () => piBuiltinCatalog.getBuiltinProviders(),
+				getBuiltinModels: (provider) =>
+					piBuiltinCatalog.getBuiltinModels(provider as Parameters<typeof piBuiltinCatalog.getBuiltinModels>[0]),
+				getBuiltinModelDataGeneratedAt: () => piBuiltinCatalog.getBuiltinModelDataGeneratedAt?.(),
+			},
 		});
 	};
 }

@@ -409,6 +409,87 @@ test("isLegacyNormalizedModel and isLegacyNormalizedSnapshot detect legacy cache
 	assert.equal(merged.fieldSources.contextWindow, "pi");
 });
 
+test("loadPiCatalog accepts the catalog from Pi's active extension module graph", async () => {
+	const snapshot = await loadPiCatalog({
+		allowlist: new Set(["openai", "zai"]),
+		builtinCatalog: {
+			getBuiltinProviders: () => ["openai", "zai", "openrouter"],
+			getBuiltinModels: (provider) => {
+				if (provider === "openai") {
+					return [
+						{
+							id: "gpt-6-astra",
+							provider,
+							contextWindow: 272_000,
+							maxTokens: 128_000,
+							reasoning: true,
+							input: ["text", "image"],
+						},
+					];
+				}
+				if (provider === "zai") {
+					return [
+						{
+							id: "glm-5.3",
+							provider,
+							contextWindow: 1_000_000,
+							maxTokens: 131_072,
+							reasoning: true,
+							input: ["text"],
+						},
+					];
+				}
+				return [{ id: "openai/gpt-6-astra", provider, contextWindow: 1_000_000 }];
+			},
+			getBuiltinModelDataGeneratedAt: () => 123,
+		},
+	});
+
+	assert.equal(snapshot.generatedAt, 123);
+	assert.equal(findPiCatalogModel("gpt-6-astra", snapshot, "openapi")?.matched.contextWindow, 272_000);
+	assert.equal(findPiCatalogModel("glm-5.3", snapshot, "maas")?.matched.maxTokens, 131_072);
+	assert.equal(snapshot.models.has("openai/gpt-6-astra"), false);
+});
+
+test("loadPiCatalog prefers the active registry and ignores proxy-provider models", async () => {
+	const snapshot = await loadPiCatalog({
+		modelRegistry: {
+			getAll: () => [
+				{
+					id: "gpt-6-astra",
+					provider: "openai",
+					contextWindow: 272_000,
+					maxTokens: 128_000,
+					reasoning: true,
+					input: ["text", "image"],
+				},
+				{
+					id: "glm-5.3",
+					provider: "zai",
+					contextWindow: 1_000_000,
+					maxTokens: 131_072,
+					reasoning: true,
+				},
+				{
+					id: "gpt-6-astra",
+					provider: "openapi",
+					contextWindow: 128_000,
+					maxTokens: 16_384,
+					reasoning: false,
+				},
+			],
+		},
+		builtinCatalog: {
+			getBuiltinProviders: () => ["openai"],
+			getBuiltinModels: () => [{ id: "gpt-6-astra", contextWindow: 1 }],
+		},
+	});
+
+	assert.equal(findPiCatalogModel("gpt-6-astra", snapshot, "openapi")?.matched.contextWindow, 272_000);
+	assert.equal(findPiCatalogModel("glm-5.3", snapshot, "maas")?.matched.contextWindow, 1_000_000);
+	assert.equal(snapshot.models.has("gpt-6-astra"), true);
+});
+
 test("loadPiCatalog caches per allowlist and does not ignore allowlist on subsequent calls", async () => {
 	// First call requesting only openai
 	const openaiCatalog = await loadPiCatalog({ allowlist: new Set(["openai"]) });

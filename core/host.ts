@@ -17,7 +17,12 @@ import {
 	type PiProviderRuntimeController,
 	prepareProviderRegistration,
 } from "./extension.ts";
-import { createEmptyCatalogSnapshot, loadPiCatalog, type PiCatalogSnapshot } from "./pi-model-metadata.ts";
+import {
+	createEmptyCatalogSnapshot,
+	loadPiCatalog,
+	type PiCatalogSnapshot,
+	type PiCatalogSource,
+} from "./pi-model-metadata.ts";
 import type { PreflightAdapter } from "./preflight-manager.ts";
 import { scheduleModelCatalogRefresh } from "./runtime.ts";
 import type { PiProviderDependencies } from "./runtime-config.ts";
@@ -44,7 +49,15 @@ function warnAdapterIssue(message: string): void {
  * event-bus envelopes are collected and assembled at the first session-level
  * operation after Pi's session_start registration barrier.
  */
-export function createPiProviderHost(dependencies: Partial<PiProviderDependencies> = {}): (pi: ExtensionAPI) => void {
+export interface PiProviderHostOptions {
+	/** Catalog functions captured from Pi's outer extension module graph. */
+	piCatalogSource?: PiCatalogSource;
+}
+
+export function createPiProviderHost(
+	dependencies: Partial<PiProviderDependencies> = {},
+	options: PiProviderHostOptions = {},
+): (pi: ExtensionAPI) => void {
 	const runtime = resolvePiProviderDependencies(dependencies);
 	return (pi) => {
 		const hostToken = {};
@@ -66,7 +79,10 @@ export function createPiProviderHost(dependencies: Partial<PiProviderDependencie
 		let disposed = false;
 		let lifecycleGeneration = 0;
 
-		const piCatalogPromise = loadPiCatalog({ fetch: runtime.fetch }).catch(() => createEmptyCatalogSnapshot());
+		const piCatalogPromise = loadPiCatalog({
+			builtinCatalog: options.piCatalogSource,
+			fetch: runtime.fetch,
+		}).catch(() => createEmptyCatalogSnapshot());
 		const bridge: StartupBridge = {
 			dependencies: runtime,
 			piCatalog: piCatalogPromise,
@@ -172,6 +188,7 @@ export function createPiProviderHost(dependencies: Partial<PiProviderDependencie
 			);
 			const piCatalogPromise = loadPiCatalog({
 				modelRegistry: ctx?.modelRegistry,
+				builtinCatalog: options.piCatalogSource,
 				fetch: runtime.fetch,
 			}).catch(() => createEmptyCatalogSnapshot());
 			const providerResultsPromise = Promise.all(

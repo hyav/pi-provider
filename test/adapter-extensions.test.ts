@@ -799,6 +799,49 @@ test("Host applies Pi catalog fallback when it registers an accepted Provider", 
 	assert.ok(model.cost.input > 0);
 });
 
+test("Host uses the active Pi registry for transport-provider model metadata", async () => {
+	const pi = new TestPi();
+	const host = createPiProviderHost();
+	host(pi as unknown as ExtensionAPI);
+	const providerFactory = defineProviderExtension({
+		id: "registry-fallback-provider",
+		create: () => ({
+			id: "registry-fallback-provider",
+			provider: {
+				name: "Registry Fallback Provider",
+				baseUrl: "https://fallback.invalid/v1",
+				apiKey: "$REGISTRY_FALLBACK_KEY",
+				api: "openai-completions",
+				models: [{ id: "gpt-6-astra" }],
+			},
+		}),
+	});
+	await providerFactory(pi as unknown as ExtensionAPI);
+	const context = createContext(pi, "registry-fallback-provider", "gpt-6-astra");
+	(context.modelRegistry as any).getAll = () => [
+		{
+			id: "gpt-6-astra",
+			provider: "openai",
+			contextWindow: 272_000,
+			maxTokens: 128_000,
+			reasoning: true,
+			input: ["text", "image"],
+			cost: { input: 10, output: 50, cacheRead: 1, cacheWrite: 12.5 },
+		},
+	];
+	await pi.emit("session_start", { type: "session_start", reason: "startup" }, context);
+	await pi.commands.get("status").handler("", context);
+
+	const registered = pi.providers.get("registry-fallback-provider");
+	assert.ok(registered);
+	const model = registered.models[0];
+	assert.equal(model.contextWindow, 272_000);
+	assert.equal(model.maxTokens, 128_000);
+	assert.equal(model.reasoning, true);
+	assert.deepEqual(model.input, ["text", "image"]);
+	assert.equal(model.cost.input, 10);
+});
+
 test("Host does not make network requests to OpenRouter on session_start", async () => {
 	let requests = 0;
 	const pi = new TestPi();

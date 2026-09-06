@@ -49,6 +49,13 @@ export interface PiCatalogSnapshot {
 	version?: string;
 }
 
+/** The generated catalog functions exposed by Pi's active pi-ai module. */
+export interface PiCatalogSource {
+	getBuiltinProviders: () => string[];
+	getBuiltinModels: (provider: string) => unknown[];
+	getBuiltinModelDataGeneratedAt?: () => number | undefined;
+}
+
 export interface ModelMatchResult {
 	matched: PiCatalogModelMeta;
 	matchType: "exact" | "alias" | "normalized";
@@ -208,13 +215,7 @@ export function parsePiCatalogFromProviders(
 
 let cachedGlobalSnapshot: PiCatalogSnapshot | undefined;
 const snapshotCache = new Map<string, PiCatalogSnapshot>();
-let cachedAllModule:
-	| {
-			getBuiltinProviders: () => string[];
-			getBuiltinModels: (provider: string) => unknown[];
-			getBuiltinModelDataGeneratedAt?: () => number;
-	  }
-	| undefined;
+let cachedAllModule: PiCatalogSource | undefined;
 
 function getAllowlistCacheKey(allowlist: ReadonlySet<string>): string {
 	if (allowlist === ORIGINAL_PI_PROVIDER_ALLOWLIST) return "__default__";
@@ -247,19 +248,109 @@ export function isLegacyNormalizedSnapshot(models: unknown): boolean {
 	return models.some(isLegacyNormalizedModel);
 }
 
+interface ModelRegistryCatalogLike {
+	getAll?: () => unknown;
+	getProvider?: (provider: string) => unknown;
+}
+
+function parsePiCatalogFromModelRegistry(
+	modelRegistry: unknown,
+	allowlist: ReadonlySet<string>,
+): PiCatalogSnapshot | undefined {
+	if (modelRegistry === null || typeof modelRegistry !== "object") return undefined;
+	const registry = modelRegistry as ModelRegistryCatalogLike;
+	const allowedProviders = new Map<string, string>();
+	for (const provider of allowlist) allowedProviders.set(provider.toLowerCase(), provider);
+	const grouped = new Map<string, unknown[]>();
+	const addModel = (model: unknown): void => {
+		if (model === null || typeof model !== "object") return;
+		const provider = (model as Record<string, unknown>).provider;
+		if (typeof provider !== "string") return;
+		const canonicalProvider = allowedProviders.get(provider.toLowerCase());
+		if (!canonicalProvider) return;
+		const models = grouped.get(canonicalProvider);
+		if (models) models.push(model);
+		else grouped.set(canonicalProvider, [model]);
+	};
+
+	if (typeof registry.getAll === "function") {
+		try {
+			const models = registry.getAll();
+			if (Array.isArray(models)) {
+				for (const model of models) addModel(model);
+				return parsePiCatalogFromProviders([...allowlist], (provider) => grouped.get(provider) ?? []);
+			}
+		} catch {
+			// Fall through to the provider-by-provider compatibility path.
+		}
+	}
+
+	if (typeof registry.getProvider !== "function") return undefined;
+	let foundProvider = false;
+	for (const provider of allowlist) {
+		try {
+			const candidate = registry.getProvider(provider);
+			if (candidate === null || typeof candidate !== "object") continue;
+			foundProvider = true;
+			const getModels = (candidate as { getModels?: unknown }).getModels;
+			if (typeof getModels !== "function") continue;
+			const models = getModels.call(candidate);
+			if (!Array.isArray(models)) continue;
+			for (const model of models) addModel(model);
+		} catch {
+			// A single provider must not prevent the remaining catalog from loading.
+		}
+	}
+	if (!foundProvider) return undefined;
+	return parsePiCatalogFromProviders([...allowlist], (provider) => grouped.get(provider) ?? []);
+}
+
+function parsePiCatalogFromSource(source: PiCatalogSource, allowlist: ReadonlySet<string>): PiCatalogSnapshot {
+	const providers = source.getBuiltinProviders();
+	const generatedAt = source.getBuiltinModelDataGeneratedAt?.();
+	return parsePiCatalogFromProviders(
+		providers,
+		(provider) => source.getBuiltinModels(provider),
+		generatedAt,
+		allowlist,
+	);
+}
+
 export interface LoadPiCatalogOptions {
 	allowlist?: ReadonlySet<string>;
+	/** Current Pi registry, preferred over any module-local static catalog. */
 	modelRegistry?: unknown;
+	/** Catalog functions captured from Pi's outer extension module graph. */
+	builtinCatalog?: PiCatalogSource;
 	fetch?: typeof globalThis.fetch;
 }
 
 export async function loadPiCatalog(
 	optionsOrAllowlist?: ReadonlySet<string> | LoadPiCatalogOptions,
 ): Promise<PiCatalogSnapshot> {
-	const allowlist =
+	const options: LoadPiCatalogOptions =
 		optionsOrAllowlist && "has" in optionsOrAllowlist
-			? (optionsOrAllowlist as ReadonlySet<string>)
-			: ((optionsOrAllowlist as LoadPiCatalogOptions | undefined)?.allowlist ?? ORIGINAL_PI_PROVIDER_ALLOWLIST);
+			? { allowlist: optionsOrAllowlist as ReadonlySet<string> }
+			: ((optionsOrAllowlist as LoadPiCatalogOptions | undefined) ?? {});
+	const allowlist = options.allowlist ?? ORIGINAL_PI_PROVIDER_ALLOWLIST;
+
+	// The registry belongs to the running Pi instance. It is intentionally not
+	// cached: Pi can refresh its native catalog while the process is alive.
+	if (options.modelRegistry !== undefined) {
+		const runtimeSnapshot = parsePiCatalogFromModelRegistry(options.modelRegistry, allowlist);
+		if (runtimeSnapshot) return runtimeSnapshot;
+	}
+
+	// A Pi-loaded entrypoint can capture the host's virtual pi-ai module before
+	// handing control to the nested Jiti graph. This is what makes startup and
+	// --list-models use the same catalog as the active Pi binary.
+	if (options.builtinCatalog) {
+		try {
+			return parsePiCatalogFromSource(options.builtinCatalog, allowlist);
+		} catch {
+			// Fall back to the module resolved from this package below.
+		}
+	}
 
 	const cacheKey = getAllowlistCacheKey(allowlist);
 	if (cacheKey === "__default__" && cachedGlobalSnapshot) return cachedGlobalSnapshot;
@@ -268,24 +359,9 @@ export async function loadPiCatalog(
 
 	try {
 		if (!cachedAllModule) {
-			cachedAllModule = (await import("@earendil-works/pi-ai/providers/all")) as {
-				getBuiltinProviders: () => string[];
-				getBuiltinModels: (provider: string) => unknown[];
-				getBuiltinModelDataGeneratedAt?: () => number;
-			};
+			cachedAllModule = (await import("@earendil-works/pi-ai/providers/all")) as PiCatalogSource;
 		}
-		const providers =
-			typeof cachedAllModule.getBuiltinProviders === "function" ? cachedAllModule.getBuiltinProviders() : [];
-		const generatedAt =
-			typeof cachedAllModule.getBuiltinModelDataGeneratedAt === "function"
-				? cachedAllModule.getBuiltinModelDataGeneratedAt()
-				: undefined;
-		const snapshot = parsePiCatalogFromProviders(
-			providers,
-			(p) => cachedAllModule!.getBuiltinModels(p),
-			generatedAt,
-			allowlist,
-		);
+		const snapshot = parsePiCatalogFromSource(cachedAllModule, allowlist);
 		snapshotCache.set(cacheKey, snapshot);
 		if (cacheKey === "__default__") {
 			cachedGlobalSnapshot = snapshot;
