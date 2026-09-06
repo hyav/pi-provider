@@ -6,7 +6,7 @@ This repository publishes from a reviewed jj revision. A `v*` tag triggers `.git
 
 ## Current release state
 
-The `0.2.0` release is prepared for publication through the reviewed `v0.2.0` tag. The current npm `latest` dist-tag remains `0.1.8` until that workflow completes. The temporary `0.1.0-oidc-bootstrap.0` registry record is an unsupported historical version and must remain deprecated; it has no Git tag and must not be reused or unpublished.
+`0.2.0` is the current release candidate. Its package metadata, lockfile, and changelog are prepared in the candidate revision, but no `v0.2.0` tag or GitHub Release exists yet. The current npm `latest` dist-tag remains `0.1.8`. After review and merge of the candidate revision into `main`, create `v0.2.0` on that exact commit and let the publish workflow run. The temporary `0.1.0-oidc-bootstrap.0` registry record is an unsupported historical version and must remain deprecated; it has no Git tag and must not be reused or unpublished.
 
 Trusted Publishing is configured for the `hyav/pi-provider` GitHub Actions workflow. Future releases must use a reviewed `v<version>` tag; no local npm token or bootstrap publication is needed.
 
