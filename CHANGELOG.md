@@ -2,6 +2,10 @@
 
 This file is the authoritative user-facing release history for `@hyav/pi-provider`.
 
+## Unreleased
+
+- Make Pi catalog model matching identity-conservative: exact IDs match first; only then are known manufacturer/transport prefixes (`z-ai/`, `x-ai/`, `mistralai/`, OpenRouter `~` mirror variants, `openapi/`, `models/`) and tier suffixes (`:free`, `-free`, `:batch`, `-batch`) stripped for a unique normalized match. Date-pinned versions (`deepseek-v4-flash-0731`) and capability variants (`-pro`, `-flash`, …) are never folded into base models, and ambiguous multi-candidate matches are rejected instead of guessed. Custom providers that are absent from the catalog now fall back to the global candidate pool during normalization instead of silently matching nothing. Provider-declared pricing (including explicit free tiers) remains authoritative with no free-tier special-casing.
+
 ## 0.2.0 - 2026-09-06
 
 - Add Pi catalog fallback based on `@earendil-works/pi-ai` built-in models, scoped to original manufacturer providers (`anthropic`, `openai`, `google`, `deepseek`, `mistral`, `xai`, `minimax`, `minimax-cn`, `moonshotai`, `moonshotai-cn`, `kimi-coding`, `zai`, `zai-coding-cn`, `xiaomi`, and `ant-ling`), strictly excluding OpenRouter, third-party proxies, aggregators, and token plans.

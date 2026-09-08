@@ -110,17 +110,37 @@ test("stripProviderPrefix removes transport and aggregator prefixes", () => {
 	assert.equal(stripProviderPrefix("deepseek/deepseek-v4-flash"), "deepseek-v4-flash");
 	assert.equal(stripProviderPrefix("custom-provider/deepseek-v4-flash", "custom-provider"), "deepseek-v4-flash");
 	assert.equal(stripProviderPrefix("gemini-3.8-flash"), "gemini-3.8-flash");
+	// Vendor name spellings used by aggregators
+	assert.equal(stripProviderPrefix("z-ai/glm-5.3"), "glm-5.3");
+	assert.equal(stripProviderPrefix("x-ai/grok-4.1"), "grok-4.1");
+	assert.equal(stripProviderPrefix("mistralai/mistral-medium-3-5"), "mistral-medium-3-5");
+	// OpenRouter mirror variants of allowlisted manufacturers
+	assert.equal(stripProviderPrefix("~deepseek/deepseek-v4-flash"), "deepseek-v4-flash");
+	assert.equal(stripProviderPrefix("~openai/gpt-4.1"), "gpt-4.1");
+	// Unknown publisher prefixes are model-name material and must not be stripped
+	assert.equal(stripProviderPrefix("sao10k/l3.1-8b-llama3.1"), "sao10k/l3.1-8b-llama3.1");
+	assert.equal(stripProviderPrefix("qwen/qwen3-coder"), "qwen/qwen3-coder");
 });
 
-test("stripKnownModelSuffixes removes date, latest, and effort suffixes", () => {
-	assert.equal(stripKnownModelSuffixes("deepseek-v4-flash-0731"), "deepseek-v4-flash");
-	assert.equal(stripKnownModelSuffixes("kimi-k2-0711-preview"), "kimi-k2");
+test("stripKnownModelSuffixes removes tier, latest, and effort suffixes only", () => {
+	// Tier suffixes are foldable: same model, different billing tier
+	assert.equal(stripKnownModelSuffixes("deepseek-v4-flash:free"), "deepseek-v4-flash");
+	assert.equal(stripKnownModelSuffixes("deepseek-v4-flash:batch"), "deepseek-v4-flash");
+	assert.equal(stripKnownModelSuffixes("glm-5.3-free"), "glm-5.3");
+	// -latest and effort selectors identify the same model
 	assert.equal(stripKnownModelSuffixes("gpt-4.1-latest"), "gpt-4.1");
 	assert.equal(stripKnownModelSuffixes("claude-sonnet-5-xhigh-effort"), "claude-sonnet-5");
-	assert.equal(stripKnownModelSuffixes("claude-opus-4-5-20251101-thinking-64k-high-effort"), "claude-opus-4-5");
+	// Date-pinned versions and capability variants must never be folded
+	assert.equal(stripKnownModelSuffixes("deepseek-v4-flash-0731"), "deepseek-v4-flash-0731");
+	assert.equal(stripKnownModelSuffixes("kimi-k2-0711-preview"), "kimi-k2-0711-preview");
+	assert.equal(
+		stripKnownModelSuffixes("claude-opus-4-5-20251101-thinking-64k-high-effort"),
+		"claude-opus-4-5-20251101-thinking-64k",
+	);
+	assert.equal(stripKnownModelSuffixes("deepseek-v4-pro"), "deepseek-v4-pro");
 });
 
-test("findPiCatalogModel matches exact ID, prefix normalized ID, and date suffix", async () => {
+test("findPiCatalogModel matches exact ID, prefix normalized ID, and tier suffix", async () => {
 	const catalog = await loadPiCatalog();
 
 	// Exact match
@@ -129,11 +149,14 @@ test("findPiCatalogModel matches exact ID, prefix normalized ID, and date suffix
 	assert.equal(deepseek?.matched.id, "deepseek-v4-flash");
 	assert.equal(deepseek?.matchType, "exact");
 
-	// Date suffix match
-	const suffixedDeepseek = findPiCatalogModel("deepseek-v4-flash-0731", catalog);
-	assert.ok(suffixedDeepseek);
-	assert.equal(suffixedDeepseek?.matched.id, "deepseek-v4-flash");
-	assert.equal(suffixedDeepseek?.matchType, "normalized");
+	// Tier suffix match folds to the base model
+	const tieredDeepseek = findPiCatalogModel("deepseek-v4-flash:free", catalog);
+	assert.ok(tieredDeepseek);
+	assert.equal(tieredDeepseek?.matched.id, "deepseek-v4-flash");
+	assert.equal(tieredDeepseek?.matchType, "normalized");
+
+	// Date-pinned IDs are identities of their own and must not fold to the base
+	assert.equal(findPiCatalogModel("deepseek-v4-flash-0731", catalog), undefined);
 
 	// Prefix stripped match
 	const googleFlash = findPiCatalogModel("google/gemini-2.0-flash", catalog);
@@ -147,16 +170,16 @@ test("findPiCatalogModel rejects ambiguous conflict when multiple candidates mat
 		["google", "openai"],
 		(provider) => {
 			if (provider === "google") {
-				return [{ id: "model-x-20260101" }];
+				return [{ id: "deepseek-v4-flash:free" }];
 			}
-			return [{ id: "model-x-20260201" }];
+			return [{ id: "deepseek-v4-flash:batch" }];
 		},
 		Date.now(),
 		new Set(["google", "openai"]),
 	);
 
-	// Both "model-x-20260101" and "model-x-20260201" strip to base "model-x" across different providers
-	const result = findPiCatalogModel("model-x", mockCatalog);
+	// Both :free and :batch fold to the same base "deepseek-v4-flash"
+	const result = findPiCatalogModel("deepseek-v4-flash", mockCatalog);
 	assert.equal(result, undefined);
 });
 
@@ -183,7 +206,7 @@ test("mergeModelWithPiCatalog merges field by field: Provider > Pi catalog > def
 	);
 
 	const draft: ProviderModelDraft = {
-		id: "deepseek-v4-flash-0731",
+		id: "deepseek-v4-flash:free", // tier suffix folds to the catalog base model
 		maxTokens: 64_000, // Provider explicitly overrides maxTokens
 		cost: { input: 0.065, output: 0.18, cacheRead: 0.016, cacheWrite: 0 }, // Provider explicit cost
 	};
@@ -329,7 +352,7 @@ test("mergeModelWithPiCatalog respects useFallback: false", () => {
 	assert.equal(result.matchType, "none");
 });
 
-test("dynamic provider draft with date-suffixed model resolves correct Pi catalog capabilities", () => {
+test("dynamic provider draft with tier-suffixed model resolves Pi catalog capabilities", () => {
 	const mockCatalog = parsePiCatalogFromProviders(
 		["deepseek"],
 		() => [
@@ -349,7 +372,7 @@ test("dynamic provider draft with date-suffixed model resolves correct Pi catalo
 
 	// Raw dynamic provider draft from /models only has id and endpoint metadata
 	const draft: ProviderModelDraft = {
-		id: "deepseek-v4-flash-0731",
+		id: "deepseek-v4-flash:free",
 		api: "openai-completions",
 		baseUrl: "https://api.example.com/v1",
 	};
@@ -368,6 +391,34 @@ test("dynamic provider draft with date-suffixed model resolves correct Pi catalo
 	assert.equal(result.fieldSources.cost, "pi");
 });
 
+test("dynamic provider draft with date-suffixed model does not fall back to base capabilities", () => {
+	const mockCatalog = parsePiCatalogFromProviders(
+		["deepseek"],
+		() => [
+			{
+				id: "deepseek-v4-flash",
+				contextWindow: 1_000_000,
+				maxTokens: 384_000,
+				reasoning: true,
+				cost: { input: 0.14, output: 0.28, cacheRead: 0.014, cacheWrite: 0.14 },
+			},
+		],
+		Date.now(),
+	);
+
+	const draft: ProviderModelDraft = {
+		id: "deepseek-v4-flash-0731",
+		api: "openai-completions",
+		baseUrl: "https://api.example.com/v1",
+	};
+
+	const result = mergeModelWithPiCatalog(draft, mockCatalog, { currentProviderId: "custom-provider" });
+	assert.equal(result.matchType, "none");
+	assert.equal(result.draft.contextWindow, undefined);
+	assert.equal(result.fieldSources.contextWindow, "default");
+	assert.equal(result.draft.cost, undefined);
+});
+
 test("isLegacyNormalizedModel and isLegacyNormalizedSnapshot detect legacy cache", () => {
 	const oldNormalizedStored = {
 		id: "deepseek-v4-flash-0731",
@@ -383,7 +434,7 @@ test("isLegacyNormalizedModel and isLegacyNormalizedSnapshot detect legacy cache
 	assert.equal(isLegacyNormalizedSnapshot([oldNormalizedStored]), true);
 
 	const rawDraft = {
-		id: "deepseek-v4-flash-0731",
+		id: "deepseek-v4-flash",
 		api: "openai-completions",
 	};
 	assert.equal(isLegacyNormalizedModel(rawDraft), false);
@@ -407,6 +458,125 @@ test("isLegacyNormalizedModel and isLegacyNormalizedSnapshot detect legacy cache
 	assert.equal(merged.draft.maxTokens, 384_000);
 	assert.equal(merged.draft.reasoning, true);
 	assert.equal(merged.fieldSources.contextWindow, "pi");
+});
+
+test("exact tier entry wins over folding to the base model", () => {
+	const mockCatalog = parsePiCatalogFromProviders(
+		["zai"],
+		() => [
+			{ id: "glm-5.3", contextWindow: 1_000_000, maxTokens: 131_072 },
+			{ id: "glm-5.3-free", contextWindow: 512_000, maxTokens: 65_536 },
+		],
+		Date.now(),
+	);
+
+	const result = findPiCatalogModel("glm-5.3-free", mockCatalog);
+	assert.ok(result);
+	assert.equal(result?.matchType, "exact");
+	assert.equal(result?.matched.id, "glm-5.3-free");
+	assert.equal(result?.matched.contextWindow, 512_000);
+});
+
+test("z-ai aggregator prefix is stripped before matching", () => {
+	const mockCatalog = parsePiCatalogFromProviders(
+		["zai"],
+		() => [{ id: "glm-5.3", contextWindow: 1_000_000 }],
+		Date.now(),
+	);
+
+	const result = findPiCatalogModel("z-ai/glm-5.3-free", mockCatalog, "charm-hyper");
+	assert.ok(result);
+	assert.equal(result?.matched.id, "glm-5.3");
+	assert.equal(result?.matchType, "normalized");
+});
+
+test("vendor name variants and mirror prefixes match catalog models", () => {
+	const mockCatalog = parsePiCatalogFromProviders(
+		["xai", "mistral", "deepseek"],
+		(provider) => {
+			if (provider === "xai") return [{ id: "grok-4.1", contextWindow: 1_000_000 }];
+			if (provider === "mistral") return [{ id: "mistral-medium-3-5", contextWindow: 128_000 }];
+			return [{ id: "deepseek-v4-flash", contextWindow: 1_000_000 }];
+		},
+		Date.now(),
+	);
+
+	// x-ai is the OpenRouter spelling of xai
+	assert.equal(findPiCatalogModel("x-ai/grok-4.1", mockCatalog)?.matched.id, "grok-4.1");
+	// mistralai is the full vendor name of mistral
+	assert.equal(findPiCatalogModel("mistralai/mistral-medium-3-5", mockCatalog)?.matched.id, "mistral-medium-3-5");
+	// ~-prefixed entries are OpenRouter mirrors of the same manufacturer
+	assert.equal(findPiCatalogModel("~deepseek/deepseek-v4-flash", mockCatalog)?.matched.id, "deepseek-v4-flash");
+});
+
+test("date-pinned IDs never fold to the base model in either direction", () => {
+	const datedOnly = parsePiCatalogFromProviders(
+		["deepseek"],
+		() => [{ id: "deepseek-v4-flash-0731", contextWindow: 1_000_000 }],
+		Date.now(),
+	);
+	// bare query against a catalog that only has the dated entry
+	assert.equal(findPiCatalogModel("deepseek-v4-flash", datedOnly), undefined);
+
+	const bareOnly = parsePiCatalogFromProviders(
+		["deepseek"],
+		() => [{ id: "deepseek-v4-flash", contextWindow: 1_000_000 }],
+		Date.now(),
+	);
+	// dated query against a catalog that only has the bare entry
+	assert.equal(findPiCatalogModel("deepseek-v4-flash-0731", bareOnly), undefined);
+
+	const crossDate = parsePiCatalogFromProviders(
+		["deepseek"],
+		() => [{ id: "deepseek-v4-flash-0801", contextWindow: 1_000_000 }],
+		Date.now(),
+	);
+	// dated queries never substitute one pinned version for another
+	assert.equal(findPiCatalogModel("deepseek-v4-flash-0731", crossDate), undefined);
+});
+
+test("findPiCatalogModel falls back to the global pool for uncatalogued providers", () => {
+	const mockCatalog = parsePiCatalogFromProviders(
+		["deepseek"],
+		() => [{ id: "deepseek-v4-flash:free", contextWindow: 1_000_000 }],
+		Date.now(),
+	);
+	// "custom-provider" is not in the catalog; the pool must fall back to global models
+	const result = findPiCatalogModel("deepseek-v4-flash", mockCatalog, "custom-provider");
+	assert.ok(result);
+	assert.equal(result?.matched.id, "deepseek-v4-flash:free");
+	assert.equal(result?.matchType, "normalized");
+});
+
+test("tier-folded models keep provider pricing untouched (no free special-casing)", () => {
+	const mockCatalog = parsePiCatalogFromProviders(
+		["deepseek"],
+		() => [
+			{
+				id: "deepseek-v4-flash",
+				contextWindow: 1_000_000,
+				maxTokens: 384_000,
+				reasoning: true,
+				cost: { input: 0.14, output: 0.28, cacheRead: 0.0028, cacheWrite: 0 },
+			},
+		],
+		Date.now(),
+	);
+
+	// Provider supplies an explicit free price: it wins untouched
+	const withPrice = mergeModelWithPiCatalog(
+		{ id: "deepseek-v4-flash:free", cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } },
+		mockCatalog,
+	);
+	assert.equal(withPrice.matchType, "normalized");
+	assert.equal(withPrice.draft.cost?.input, 0);
+	assert.equal(withPrice.fieldSources.cost, "provider");
+
+	// No provider price: the catalog price is used as-is, without free-specific handling
+	const withoutPrice = mergeModelWithPiCatalog({ id: "deepseek-v4-flash:free" }, mockCatalog);
+	assert.equal(withoutPrice.matchType, "normalized");
+	assert.equal(withoutPrice.draft.cost?.input, 0.14);
+	assert.equal(withoutPrice.fieldSources.cost, "pi");
 });
 
 test("loadPiCatalog accepts the catalog from Pi's active extension module graph", async () => {

@@ -430,6 +430,23 @@ export function toPiCatalogSnapshot(candidate: unknown): PiCatalogSnapshot | und
 	return cachedGlobalSnapshot ?? undefined;
 }
 
+/** Prefixes that identify the owning manufacturer or transport shim rather than the model name. */
+const KNOWN_MODEL_PREFIXES: ReadonlySet<string> = new Set([
+	...ORIGINAL_PI_PROVIDER_ALLOWLIST,
+	// Vendor name spellings used by aggregators (OpenRouter-style publisher prefixes)
+	"z-ai", // Z.ai
+	"x-ai", // xAI
+	"mistralai", // Mistral AI
+	"~anthropic",
+	"~deepseek",
+	"~google",
+	"~moonshotai",
+	"~openai",
+	"~x-ai", // OpenRouter mirror variants for the same manufacturers
+	"openapi",
+	"models",
+]);
+
 export function stripProviderPrefix(modelId: string, currentProviderId?: string): string {
 	let candidate = modelId.trim();
 	if (currentProviderId && candidate.toLowerCase().startsWith(`${currentProviderId.toLowerCase()}/`)) {
@@ -438,42 +455,23 @@ export function stripProviderPrefix(modelId: string, currentProviderId?: string)
 	const slashIndex = candidate.indexOf("/");
 	if (slashIndex > 0) {
 		const prefix = candidate.slice(0, slashIndex).toLowerCase();
-		if (
-			prefix === "openapi" ||
-			prefix === "models" ||
-			prefix === "google" ||
-			prefix === "deepseek" ||
-			prefix === "anthropic" ||
-			prefix === "openai" ||
-			prefix === "xai" ||
-			prefix === "minimax" ||
-			prefix === "mistral" ||
-			prefix === "moonshotai" ||
-			prefix === "zai"
-		) {
+		if (KNOWN_MODEL_PREFIXES.has(prefix)) {
 			candidate = candidate.slice(slashIndex + 1);
 		}
 	}
 	return candidate;
 }
 
-const DATE_SUFFIX_REGEX = /-(?:20\d{2}[-_]?\d{2}[-_]?\d{2}|\d{4})$/i;
 const LATEST_SUFFIX_REGEX = /-latest$/i;
 const EFFORT_SUFFIX_REGEX = /-(?:minimal|low|medium|high|xhigh|max|thinking|reasoning)(?:-effort)?$/i;
-const THINKING_BUDGET_REGEX = /-(?:thinking|budget)-\d+k$/i;
-const PREVIEW_SUFFIX_REGEX = /-preview(?:-\d{2}-\d{4}|-\d{4})?$/i;
+const TIER_SUFFIX_REGEX = /(?:-|:)(?:free|batch)$/i;
 
 export function stripKnownModelSuffixes(modelId: string): string {
 	let result = modelId;
 	let changed = true;
 	while (changed) {
 		const prev = result;
-		result = result
-			.replace(DATE_SUFFIX_REGEX, "")
-			.replace(LATEST_SUFFIX_REGEX, "")
-			.replace(EFFORT_SUFFIX_REGEX, "")
-			.replace(THINKING_BUDGET_REGEX, "")
-			.replace(PREVIEW_SUFFIX_REGEX, "");
+		result = result.replace(LATEST_SUFFIX_REGEX, "").replace(EFFORT_SUFFIX_REGEX, "").replace(TIER_SUFFIX_REGEX, "");
 		changed = result !== prev;
 	}
 	return result;
@@ -488,65 +486,57 @@ export function findPiCatalogModel(
 	const trimmed = modelId.trim();
 	const lower = trimmed.toLowerCase();
 
-	// Step 1: Exact match of full ID
-	if (currentProviderId) {
-		const providerModels = catalog.byProvider.get(currentProviderId.toLowerCase());
-		const exactInProvider = providerModels?.get(lower);
-		if (exactInProvider) {
-			return { matched: exactInProvider, matchType: "exact", provider: currentProviderId };
+	const lookup = (candidate: string): PiCatalogModelMeta | undefined => {
+		if (currentProviderId) {
+			const inProvider = catalog.byProvider.get(currentProviderId.toLowerCase())?.get(candidate);
+			if (inProvider) return inProvider;
 		}
-	}
-	const exactGlobal = catalog.models.get(lower);
-	if (exactGlobal) {
-		return { matched: exactGlobal, matchType: "exact", provider: exactGlobal.provider };
+		return catalog.models.get(candidate);
+	};
+
+	// Step 1: Exact match of full ID
+	const exact = lookup(lower);
+	if (exact) {
+		return { matched: exact, matchType: "exact", provider: exact.provider };
 	}
 
 	// Step 2: Strip transport provider prefix
 	const strippedPrefix = stripProviderPrefix(trimmed, currentProviderId).toLowerCase();
 	if (strippedPrefix !== lower) {
-		if (currentProviderId) {
-			const providerModels = catalog.byProvider.get(currentProviderId.toLowerCase());
-			const matchInProvider = providerModels?.get(strippedPrefix);
-			if (matchInProvider) {
-				return { matched: matchInProvider, matchType: "normalized", provider: currentProviderId };
-			}
-		}
-		const matchGlobal = catalog.models.get(strippedPrefix);
-		if (matchGlobal) {
-			return { matched: matchGlobal, matchType: "normalized", provider: matchGlobal.provider };
+		const strippedMatch = lookup(strippedPrefix);
+		if (strippedMatch) {
+			return { matched: strippedMatch, matchType: "normalized", provider: strippedMatch.provider };
 		}
 	}
 
-	// Step 3 & 4: Handle known latest, date, effort suffixes
+	// Step 3: Strip known model suffixes (tier free/batch, latest, effort)
 	const baseModelName = stripKnownModelSuffixes(strippedPrefix).toLowerCase();
 	if (baseModelName !== "" && baseModelName !== strippedPrefix) {
-		if (currentProviderId) {
-			const providerModels = catalog.byProvider.get(currentProviderId.toLowerCase());
-			const matchBaseInProvider = providerModels?.get(baseModelName);
-			if (matchBaseInProvider) {
-				return { matched: matchBaseInProvider, matchType: "normalized", provider: currentProviderId };
-			}
-		}
-		const matchBaseGlobal = catalog.models.get(baseModelName);
-		if (matchBaseGlobal) {
-			return { matched: matchBaseGlobal, matchType: "normalized", provider: matchBaseGlobal.provider };
+		const baseMatch = lookup(baseModelName);
+		if (baseMatch) {
+			return { matched: baseMatch, matchType: "normalized", provider: baseMatch.provider };
 		}
 	}
 
-	// Step 5: Search for models matching normalized base name across pool
-	const candidates: PiCatalogModelMeta[] = [];
-	const searchPool = currentProviderId
-		? (catalog.byProvider.get(currentProviderId.toLowerCase())?.values() ?? [])
-		: catalog.models.values();
+	// Step 4: Search for a unique candidate whose normalized ID matches the
+	// query. The pool is scoped to the current provider when it is catalogued,
+	// falling back to the global model pool otherwise (custom providers are
+	// never catalogued, so an empty pool would silently defeat this lookup).
+	const providerPool = currentProviderId ? catalog.byProvider.get(currentProviderId.toLowerCase()) : undefined;
+	const searchPool = providerPool?.values() ?? catalog.models.values();
 
+	const candidates: PiCatalogModelMeta[] = [];
 	for (const candidate of searchPool) {
 		const candLower = candidate.id.toLowerCase();
-		if (candLower === strippedPrefix || candLower === baseModelName) {
-			candidates.push(candidate);
-			continue;
-		}
-		const candBase = stripKnownModelSuffixes(candLower);
-		if (candBase === baseModelName) {
+		const candNormalized = stripKnownModelSuffixes(
+			stripProviderPrefix(candidate.id, candidate.provider).toLowerCase(),
+		).toLowerCase();
+		if (
+			candLower === strippedPrefix ||
+			candLower === baseModelName ||
+			candNormalized === strippedPrefix ||
+			candNormalized === baseModelName
+		) {
 			candidates.push(candidate);
 		}
 	}

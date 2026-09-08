@@ -113,6 +113,8 @@ export default defineProviderExtension({
 
 1. **Provider 端点显式字段（最高优先级）**：从 Provider 接口响应中显式解析出的属性（如 `contextWindow`、`maxTokens`、`cost`、`input`、`reasoning`、`thinkingLevelMap` 及 `compat`）优先保留。显式 `false`（`reasoning: false`）、显式零价格（`cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }`）以及显式单模态（`input: ["text"]`）均被视为 Provider 的明确声明，绝不会被后续层级覆盖。
 2. **Pi Catalog 回退补全**：若 raw `ProviderModelDraft` 中未声明某些字段（值为 `undefined`），Pi catalog fallback 会在原厂列表（Anthropic、OpenAI、Google、DeepSeek、Mistral、xAI、MiniMax、Moonshot/Kimi、ZAI、Xiaomi、Ant-Ling）中按确定性规则检索同名模型，仅补齐缺失的价格、上下文窗口、推理开关、思维层级映射和输入模态。存在命名歧义或多候选项时拒绝匹配。该回退只补充 Provider 已列出的模型，绝不会凭空创建新模型。
+
+   模型匹配遵循身份保守原则。首先尝试完整 ID 精确匹配；仅在失败后才剥离已知的传输/厂商前缀（`z-ai/`、`x-ai/`、`mistralai/`、OpenRouter 的 `~` 镜像变体如 `~deepseek/`、`openapi/`、`models/`）与档位后缀（`:free`、`-free`、`:batch`、`-batch`），并接受唯一归一化匹配。日期固定版本（`deepseek-v4-flash-0731`）与能力变体（`-pro`、`-flash`、`-mini` 等）绝不会归并到基础模型：裸 ID 不会解析到带日期的条目，带日期的 ID 也不会解析到裸条目或其他日期；多个归一化候选一律拒绝而非猜测。计费与匹配相互独立：Provider 声明的价格（包括显式免费档）始终优先，目录价格仅在 Provider 未声明时兜底，不存在任何免费档特判。
 3. **默认归一化兜底（最低优先级）**：若 Provider 端点与 Pi catalog 均未提供某项能力，系统将填充最后的安全兜底值（`contextWindow: 128_000`、`maxTokens: 16_384`、`cost: 0`、`reasoning: false`、`input: ["text"]`）。
 
 ### 原始草稿与缓存边界
