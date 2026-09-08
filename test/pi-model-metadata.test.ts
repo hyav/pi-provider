@@ -140,7 +140,7 @@ test("stripKnownModelSuffixes removes tier, latest, and effort suffixes only", (
 	assert.equal(stripKnownModelSuffixes("deepseek-v4-pro"), "deepseek-v4-pro");
 });
 
-test("findPiCatalogModel matches exact ID, prefix normalized ID, and tier suffix", async () => {
+test("findPiCatalogModel matches exact ID, prefix normalized ID, tier suffix, and date-pin fallback", async () => {
 	const catalog = await loadPiCatalog();
 
 	// Exact match
@@ -155,8 +155,11 @@ test("findPiCatalogModel matches exact ID, prefix normalized ID, and tier suffix
 	assert.equal(tieredDeepseek?.matched.id, "deepseek-v4-flash");
 	assert.equal(tieredDeepseek?.matchType, "normalized");
 
-	// Date-pinned IDs are identities of their own and must not fold to the base
-	assert.equal(findPiCatalogModel("deepseek-v4-flash-0731", catalog), undefined);
+	// Date-pinned IDs fold to the base model when no pinned entry is catalogued
+	const datedDeepseek = findPiCatalogModel("deepseek-v4-flash-0731", catalog);
+	assert.ok(datedDeepseek);
+	assert.equal(datedDeepseek?.matched.id, "deepseek-v4-flash");
+	assert.equal(datedDeepseek?.matchType, "normalized");
 
 	// Prefix stripped match
 	const googleFlash = findPiCatalogModel("google/gemini-2.0-flash", catalog);
@@ -391,7 +394,7 @@ test("dynamic provider draft with tier-suffixed model resolves Pi catalog capabi
 	assert.equal(result.fieldSources.cost, "pi");
 });
 
-test("dynamic provider draft with date-suffixed model does not fall back to base capabilities", () => {
+test("dynamic provider draft with date-suffixed model inherits base capabilities", () => {
 	const mockCatalog = parsePiCatalogFromProviders(
 		["deepseek"],
 		() => [
@@ -400,12 +403,14 @@ test("dynamic provider draft with date-suffixed model does not fall back to base
 				contextWindow: 1_000_000,
 				maxTokens: 384_000,
 				reasoning: true,
+				thinkingLevelMap: { off: null, low: "low", high: "high", max: "max" },
 				cost: { input: 0.14, output: 0.28, cacheRead: 0.014, cacheWrite: 0.14 },
 			},
 		],
 		Date.now(),
 	);
 
+	// Raw dynamic provider draft from /models only has id and endpoint metadata
 	const draft: ProviderModelDraft = {
 		id: "deepseek-v4-flash-0731",
 		api: "openai-completions",
@@ -413,10 +418,15 @@ test("dynamic provider draft with date-suffixed model does not fall back to base
 	};
 
 	const result = mergeModelWithPiCatalog(draft, mockCatalog, { currentProviderId: "custom-provider" });
-	assert.equal(result.matchType, "none");
-	assert.equal(result.draft.contextWindow, undefined);
-	assert.equal(result.fieldSources.contextWindow, "default");
-	assert.equal(result.draft.cost, undefined);
+	assert.equal(result.matchType, "normalized");
+	assert.equal(result.draft.contextWindow, 1_000_000);
+	assert.equal(result.draft.reasoning, true);
+	assert.deepEqual(result.draft.thinkingLevelMap, { off: null, low: "low", high: "high", max: "max" });
+	assert.equal(result.draft.cost?.input, 0.14);
+	assert.equal(result.fieldSources.contextWindow, "pi");
+	assert.equal(result.fieldSources.reasoning, "pi");
+	assert.equal(result.fieldSources.thinkingLevelMap, "pi");
+	assert.equal(result.fieldSources.cost, "pi");
 });
 
 test("isLegacyNormalizedModel and isLegacyNormalizedSnapshot detect legacy cache", () => {
@@ -509,22 +519,25 @@ test("vendor name variants and mirror prefixes match catalog models", () => {
 	assert.equal(findPiCatalogModel("~deepseek/deepseek-v4-flash", mockCatalog)?.matched.id, "deepseek-v4-flash");
 });
 
-test("date-pinned IDs never fold to the base model in either direction", () => {
-	const datedOnly = parsePiCatalogFromProviders(
-		["deepseek"],
-		() => [{ id: "deepseek-v4-flash-0731", contextWindow: 1_000_000 }],
-		Date.now(),
-	);
-	// bare query against a catalog that only has the dated entry
-	assert.equal(findPiCatalogModel("deepseek-v4-flash", datedOnly), undefined);
-
+test("date-pinned queries fall back to the bare base model only as a last resort", () => {
 	const bareOnly = parsePiCatalogFromProviders(
 		["deepseek"],
 		() => [{ id: "deepseek-v4-flash", contextWindow: 1_000_000 }],
 		Date.now(),
 	);
 	// dated query against a catalog that only has the bare entry
-	assert.equal(findPiCatalogModel("deepseek-v4-flash-0731", bareOnly), undefined);
+	const fallback = findPiCatalogModel("deepseek-v4-flash-0731", bareOnly);
+	assert.ok(fallback);
+	assert.equal(fallback?.matched.id, "deepseek-v4-flash");
+	assert.equal(fallback?.matchType, "normalized");
+
+	const datedOnly = parsePiCatalogFromProviders(
+		["deepseek"],
+		() => [{ id: "deepseek-v4-flash-0731", contextWindow: 1_000_000 }],
+		Date.now(),
+	);
+	// a bare query never resolves to a dated entry
+	assert.equal(findPiCatalogModel("deepseek-v4-flash", datedOnly), undefined);
 
 	const crossDate = parsePiCatalogFromProviders(
 		["deepseek"],
@@ -533,6 +546,20 @@ test("date-pinned IDs never fold to the base model in either direction", () => {
 	);
 	// dated queries never substitute one pinned version for another
 	assert.equal(findPiCatalogModel("deepseek-v4-flash-0731", crossDate), undefined);
+
+	// an exact pinned entry wins over the bare base model
+	const pinnedAndBare = parsePiCatalogFromProviders(
+		["deepseek"],
+		() => [
+			{ id: "deepseek-v4-flash", contextWindow: 1_000_000 },
+			{ id: "deepseek-v4-flash-0731", contextWindow: 512_000 },
+		],
+		Date.now(),
+	);
+	const exactPinned = findPiCatalogModel("deepseek-v4-flash-0731", pinnedAndBare);
+	assert.ok(exactPinned);
+	assert.equal(exactPinned?.matchType, "exact");
+	assert.equal(exactPinned?.matched.id, "deepseek-v4-flash-0731");
 });
 
 test("findPiCatalogModel falls back to the global pool for uncatalogued providers", () => {

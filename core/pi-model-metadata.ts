@@ -462,6 +462,8 @@ export function stripProviderPrefix(modelId: string, currentProviderId?: string)
 	return candidate;
 }
 
+/** Trailing date pins (`-0731`, `-20251101`, `-2025-11-01`) identify a dated snapshot of a base model. */
+const DATE_SUFFIX_REGEX = /-(?:20\d{2}[-_]?\d{2}[-_]?\d{2}|\d{4})$/i;
 const LATEST_SUFFIX_REGEX = /-latest$/i;
 const EFFORT_SUFFIX_REGEX = /-(?:minimal|low|medium|high|xhigh|max|thinking|reasoning)(?:-effort)?$/i;
 const TIER_SUFFIX_REGEX = /(?:-|:)(?:free|batch)$/i;
@@ -522,33 +524,47 @@ export function findPiCatalogModel(
 	// query. The pool is scoped to the current provider when it is catalogued,
 	// falling back to the global model pool otherwise (custom providers are
 	// never catalogued, so an empty pool would silently defeat this lookup).
-	const providerPool = currentProviderId ? catalog.byProvider.get(currentProviderId.toLowerCase()) : undefined;
-	const searchPool = providerPool?.values() ?? catalog.models.values();
+	const searchUniqueCandidate = (queryNames: readonly string[]): PiCatalogModelMeta | undefined => {
+		const providerPool = currentProviderId ? catalog.byProvider.get(currentProviderId.toLowerCase()) : undefined;
+		const searchPool = providerPool?.values() ?? catalog.models.values();
 
-	const candidates: PiCatalogModelMeta[] = [];
-	for (const candidate of searchPool) {
-		const candLower = candidate.id.toLowerCase();
-		const candNormalized = stripKnownModelSuffixes(
-			stripProviderPrefix(candidate.id, candidate.provider).toLowerCase(),
-		).toLowerCase();
-		if (
-			candLower === strippedPrefix ||
-			candLower === baseModelName ||
-			candNormalized === strippedPrefix ||
-			candNormalized === baseModelName
-		) {
-			candidates.push(candidate);
+		const uniqueCandidates = new Map<string, PiCatalogModelMeta>();
+		for (const candidate of searchPool) {
+			const candLower = candidate.id.toLowerCase();
+			const candNormalized = stripKnownModelSuffixes(
+				stripProviderPrefix(candidate.id, candidate.provider).toLowerCase(),
+			).toLowerCase();
+			if (queryNames.some((name) => name !== "" && (name === candLower || name === candNormalized))) {
+				uniqueCandidates.set(candidate.id.toLowerCase(), candidate);
+			}
 		}
+		if (uniqueCandidates.size === 1) {
+			return uniqueCandidates.values().next().value as PiCatalogModelMeta;
+		}
+		return undefined;
+	};
+
+	const poolMatch = searchUniqueCandidate([strippedPrefix, baseModelName]);
+	if (poolMatch) {
+		return { matched: poolMatch, matchType: "normalized", provider: poolMatch.provider };
 	}
 
-	const uniqueCandidates = new Map<string, PiCatalogModelMeta>();
-	for (const cand of candidates) {
-		uniqueCandidates.set(cand.id.toLowerCase(), cand);
-	}
-
-	if (uniqueCandidates.size === 1) {
-		const matched = uniqueCandidates.values().next().value as PiCatalogModelMeta;
-		return { matched, matchType: "normalized", provider: matched.provider };
+	// Step 5: A date-pinned snapshot falls back to its bare base model only when
+	// no pinned entry matched (exact dated matches already returned in step 1).
+	// This resolves e.g. "deepseek-v4-flash-0731" to the "deepseek-v4-flash"
+	// catalog entry. The bare base entry is the only acceptable substitute: a
+	// bare query never resolves to a dated entry, and one pinned date never
+	// substitutes another.
+	const dateStripped = baseModelName.replace(DATE_SUFFIX_REGEX, "").toLowerCase();
+	if (dateStripped !== "" && dateStripped !== baseModelName) {
+		const dateBaseMatch = lookup(dateStripped);
+		if (dateBaseMatch) {
+			return { matched: dateBaseMatch, matchType: "normalized", provider: dateBaseMatch.provider };
+		}
+		const datePoolMatch = searchUniqueCandidate([dateStripped]);
+		if (datePoolMatch) {
+			return { matched: datePoolMatch, matchType: "normalized", provider: datePoolMatch.provider };
+		}
 	}
 
 	return undefined;
